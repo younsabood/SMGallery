@@ -12,6 +12,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # إعداد Flask
+# تم تغيير اسم الملف من Bot.py إلى app.py ليتوافق مع الإعدادات الافتراضية لخادم Gunicorn على Render.
+# الآن، Gunicorn سيتمكن من العثور على التطبيق.
 app = Flask(__name__)
 
 # إعدادات البوت
