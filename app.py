@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import json
 import logging
@@ -5,7 +6,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
 import firebase_admin
-from firebase_admin import credentials, db
+from firebase_admin import credentials, firestore
 
 # إعداد التسجيل
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,31 +20,64 @@ BOT_TOKEN = "8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM"
 ADMIN_USER_ID = "5679396406"  # ID المستخدم الخاص بك كمدير
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 
-# اسم ملف مفتاح الخدمة
-FIREBASE_CONFIG_FILE = 'scmtadmin-firebase-adminsdk-fbsvc-35394bb17a.json'
-
-# تهيئة Firebase
+# تهيئة Firebase لقاعدتي البيانات (الإدارة والموقع)
 firebase_initialized = False
+admin_db = None
+view_db = None
+
+# إعدادات قاعدة بيانات الإدارة
+admin_config = {
+    "apiKey": "AIzaSyBOVkRVadpm0-jAv8wmyIhkAfPFf6NXMAI",
+    "authDomain": "syriancoastmartyrsadmin.firebaseapp.com",
+    "projectId": "syriancoastmartyrsadmin",
+    "storageBucket": "syriancoastmartyrsadmin.firebasestorage.app",
+    "messagingSenderId": "87419736688",
+    "appId": "1:87419736688:web:eaf9a9abf1472542f81ab5",
+    "measurementId": "G-JX5P16CKKG"
+}
+
+# إعدادات قاعدة بيانات الموقع
+view_config = {
+    "apiKey": "AIzaSyCL5FbARVnYViuO4VOP9yZmUXyQEy81df8",
+    "authDomain": "syriancoastmartyrs.firebaseapp.com",
+    "projectId": "syriancoastmartyrs",
+    "storageBucket": "syriancoastmartyrs.firebasestorage.app",
+    "messagingSenderId": "950493318163",
+    "appId": "1:950493318163:web:0a8724c4fbc2292de403e6",
+    "measurementId": "G-TVDMHHHLPT"
+}
+
+# اسم ملف مفتاح الخدمة
+ADMIN_CREDENTIALS_FILE = 'scmtadmin-firebase-adminsdk-fbsvc-35394bb17a.json'
+VIEW_CREDENTIALS_FILE = 'scmtview-firebase-adminsdk-fbsvc-0a8724c4fbc2292de403e6.json'
+
 try:
-    if not os.path.exists(FIREBASE_CONFIG_FILE):
-        logger.error(f"Firebase configuration file '{FIREBASE_CONFIG_FILE}' not found.")
-        raise FileNotFoundError(f"Firebase configuration file not found: {FIREBASE_CONFIG_FILE}")
-    
-    # التحقق من أن الملف غير فارغ وصالح
-    with open(FIREBASE_CONFIG_FILE, 'r') as f:
-        config_data = json.load(f)
-        if not config_data.get('private_key') or not config_data.get('client_email'):
-            raise ValueError("Invalid Firebase configuration: missing required keys")
-    
-    cred = credentials.Certificate(FIREBASE_CONFIG_FILE)
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://scmtadmin-default-rtdb.firebaseio.com/'
-    })
+    if os.path.exists(ADMIN_CREDENTIALS_FILE):
+        admin_cred = credentials.Certificate(ADMIN_CREDENTIALS_FILE)
+        admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
+        admin_db = firestore.client(admin_app)
+        logger.info("Admin Firebase app initialized successfully.")
+    else:
+        logger.error(f"Admin credentials file '{ADMIN_CREDENTIALS_FILE}' not found.")
+
+    if os.path.exists(VIEW_CREDENTIALS_FILE):
+        view_cred = credentials.Certificate(VIEW_CREDENTIALS_FILE)
+        view_app = firebase_admin.initialize_app(view_cred, name='view_app')
+        view_db = firestore.client(view_app)
+        logger.info("View Firebase app initialized successfully.")
+    else:
+        logger.error(f"View credentials file '{VIEW_CREDENTIALS_FILE}' not found.")
+        
     firebase_initialized = True
-    logger.info("Firebase initialized successfully")
 except Exception as e:
     logger.error(f"Firebase initialization failed: {e}")
     firebase_initialized = False
+
+# مسارات Firestore
+USER_SESSIONS_COLLECTION = 'user_sessions'
+PENDING_REQUESTS_COLLECTION = 'pending_requests'
+USER_REQUESTS_COLLECTION = 'user_requests'
+MARTYRS_COLLECTION = 'martyrs'
 
 # حالات الجلسة
 STATES = {
@@ -58,150 +92,148 @@ STATES = {
     'WAITING_PHOTO': 'waiting_photo'
 }
 
-# متغيرات لتخزين الجلسات في الذاكرة كبديل عن Firebase
+# متغيرات لتخزين الجلسات في الذاكرة كبديل (للتطوير المحلي)
 user_sessions = {}
-pending_requests = {}
-user_requests = {}
 
-# دوال Firebase المحسنة
+# دوال Firestore
 def is_firebase_ready():
     """التحقق من حالة تهيئة Firebase"""
-    return firebase_initialized and len(firebase_admin._apps) > 0
+    return firebase_initialized and admin_db is not None and view_db is not None
 
 def save_user_session(user_id, session_data):
-    """حفظ جلسة المستخدم"""
+    """حفظ جلسة المستخدم في Firestore"""
+    if not is_firebase_ready():
+        user_sessions[user_id] = session_data
+        logger.warning("Firebase not ready. Session saved to memory.")
+        return True
     try:
-        if is_firebase_ready():
-            ref = db.reference(f'user_sessions/{user_id}')
-            ref.set(session_data)
-            logger.info(f"Session saved to Firebase for user {user_id}")
-        else:
-            # حفظ في الذاكرة كبديل
-            user_sessions[user_id] = session_data
-            logger.info(f"Session saved to memory for user {user_id}")
+        doc_ref = admin_db.collection(USER_SESSIONS_COLLECTION).document(str(user_id))
+        doc_ref.set(session_data)
         return True
     except Exception as e:
         logger.error(f"Error saving session for user {user_id}: {e}")
-        # حفظ في الذاكرة كبديل
-        user_sessions[user_id] = session_data
-        return True
+        return False
 
 def get_user_session(user_id):
-    """استرجاع جلسة المستخدم"""
+    """استرجاع جلسة المستخدم من Firestore"""
+    if not is_firebase_ready():
+        return user_sessions.get(str(user_id), {'state': STATES['IDLE'], 'data': {}})
     try:
-        if is_firebase_ready():
-            ref = db.reference(f'user_sessions/{user_id}')
-            session = ref.get()
-            if session:
-                return session
-        
-        # استرجاع من الذاكرة
-        return user_sessions.get(user_id, {'state': STATES['IDLE'], 'data': {}})
+        doc_ref = admin_db.collection(USER_SESSIONS_COLLECTION).document(str(user_id))
+        doc = doc_ref.get()
+        if doc.exists:
+            return doc.to_dict()
+        else:
+            return {'state': STATES['IDLE'], 'data': {}}
     except Exception as e:
         logger.error(f"Error getting session for user {user_id}: {e}")
-        return user_sessions.get(user_id, {'state': STATES['IDLE'], 'data': {}})
+        return {'state': STATES['IDLE'], 'data': {}}
 
 def clear_user_session(user_id):
-    """مسح جلسة المستخدم"""
+    """مسح جلسة المستخدم من Firestore"""
+    if not is_firebase_ready():
+        if str(user_id) in user_sessions:
+            del user_sessions[str(user_id)]
+        return True
     try:
-        if is_firebase_ready():
-            ref = db.reference(f'user_sessions/{user_id}')
-            ref.delete()
-            logger.info(f"Session cleared from Firebase for user {user_id}")
-        
-        # مسح من الذاكرة أيضاً
-        if user_id in user_sessions:
-            del user_sessions[user_id]
+        doc_ref = admin_db.collection(USER_SESSIONS_COLLECTION).document(str(user_id))
+        doc_ref.delete()
         return True
     except Exception as e:
         logger.error(f"Error clearing session for user {user_id}: {e}")
-        # مسح من الذاكرة فقط
-        if user_id in user_sessions:
-            del user_sessions[user_id]
-        return True
+        return False
 
 def save_request(user_id, request_data):
-    """حفظ طلب جديد"""
-    request_id = f"req_{user_id}_{int(datetime.now().timestamp())}"
-    
+    """حفظ طلب جديد في Firestore"""
+    if not is_firebase_ready():
+        logger.error("Firebase not ready. Cannot save request.")
+        return None
     try:
-        if is_firebase_ready():
-            pending_ref = db.reference('pending_requests')
-            new_request_ref = pending_ref.child(request_id)
-            new_request_ref.set(request_data)
-            
-            user_ref = db.reference(f'user_requests/{user_id}/{request_id}')
-            user_ref.set(request_data)
-            logger.info(f"Request saved to Firebase: {request_id}")
-        else:
-            # حفظ في الذاكرة
-            if 'pending_requests' not in globals():
-                globals()['pending_requests'] = {}
-            if user_id not in user_requests:
-                user_requests[user_id] = {}
-            
-            pending_requests[request_id] = request_data
-            user_requests[user_id][request_id] = request_data
-            logger.info(f"Request saved to memory: {request_id}")
+        batch = admin_db.batch()
         
-        return request_id
+        # إضافة الطلب إلى قائمة الطلبات المعلقة
+        pending_ref = admin_db.collection(PENDING_REQUESTS_COLLECTION).document()
+        request_data['request_id'] = pending_ref.id # حفظ ID المستند
+        batch.set(pending_ref, request_data)
+        
+        # إضافة الطلب إلى قائمة طلبات المستخدم
+        user_ref = admin_db.collection(USER_REQUESTS_COLLECTION).document(str(user_id)).collection('requests').document(pending_ref.id)
+        batch.set(user_ref, request_data)
+
+        batch.commit()
+        logger.info(f"Request saved to Firestore: {pending_ref.id}")
+        return pending_ref.id
     except Exception as e:
         logger.error(f"Error saving request for user {user_id}: {e}")
-        # حفظ في الذاكرة كبديل
-        if 'pending_requests' not in globals():
-            globals()['pending_requests'] = {}
-        if user_id not in user_requests:
-            user_requests[user_id] = {}
-        
-        pending_requests[request_id] = request_data
-        user_requests[user_id][request_id] = request_data
-        return request_id
+        return None
 
 def update_request_status(request_id, new_status, user_id):
-    """تحديث حالة الطلب"""
+    """تحديث حالة الطلب ونقل البيانات عند الموافقة"""
+    if not is_firebase_ready():
+        logger.error("Firebase not ready. Cannot update request status.")
+        return False
+    
+    pending_ref = admin_db.collection(PENDING_REQUESTS_COLLECTION).document(request_id)
+    user_ref = admin_db.collection(USER_REQUESTS_COLLECTION).document(str(user_id)).collection('requests').document(request_id)
+    
     try:
-        updates = {
-            'status': new_status,
-            'reviewed_at': datetime.now().isoformat()
-        }
-        
-        if is_firebase_ready():
-            pending_ref = db.reference(f'pending_requests/{request_id}')
-            user_ref = db.reference(f'user_requests/{user_id}/{request_id}')
+        if new_status == 'approved':
+            # نقل البيانات في معاملة لضمان السلامة
+            martyr_data = None
+            transaction = admin_db.transaction()
             
-            # تحديث الحالة
-            pending_ref.update(updates)
-            user_ref.update(updates)
-
-            if new_status == 'approved':
-                # نقل البيانات إلى قاعدة بيانات الشهداء المعتمدة
-                martyr_data = pending_ref.child('martyr_data').get()
-                if martyr_data:
-                    db.reference('martyrs').push(martyr_data)
-                    
-            # حذف الطلب من قائمة الطلبات المعلقة
+            @firestore.transactional
+            def approve_in_transaction(transaction, pending_ref, user_ref):
+                doc_snap = pending_ref.get(transaction=transaction)
+                if not doc_snap.exists:
+                    raise ValueError("Request document does not exist.")
+                
+                nonlocal martyr_data
+                martyr_data = doc_snap.to_dict().get('martyr_data')
+                
+                # إضافة المستند إلى قاعدة بيانات الموقع
+                new_doc_ref = view_db.collection(MARTYRS_COLLECTION).document()
+                new_doc_ref.set(martyr_data)
+                
+                # تحديث حالة الطلب
+                transaction.update(pending_ref, {'status': 'approved', 'reviewed_at': datetime.now().isoformat()})
+                transaction.update(user_ref, {'status': 'approved', 'reviewed_at': datetime.now().isoformat()})
+                
+                # حذف الطلب من قائمة الطلبات المعلقة
+                transaction.delete(pending_ref)
+            
+            approve_in_transaction(transaction, pending_ref, user_ref)
+            
+            # إرسال إشعار للمستخدم بعد اكتمال المعاملة
+            martyr_name = martyr_data.get('full_name', 'غير محدد')
+            send_telegram_message(str(user_id), f"<b>🎉 تهانينا!</b>\n\nتم قبول طلبك لإضافة الشهيد <b>{martyr_name}</b>.\n\nشكراً لك على مساهمتك في حفظ ذكرى شهدائنا الأبرار.")
+            return True
+            
+        elif new_status == 'rejected':
+            batch = admin_db.batch()
+            updates = {
+                'status': new_status,
+                'reviewed_at': datetime.now().isoformat()
+            }
+            batch.update(pending_ref, updates)
+            batch.update(user_ref, updates)
+            batch.commit()
+            
+            # إزالة الطلب من الطلبات المعلقة بعد تحديث الحالة
             pending_ref.delete()
-        else:
-            # تحديث في الذاكرة
-            if request_id in pending_requests:
-                pending_requests[request_id].update(updates)
-                
-                if new_status == 'approved':
-                    # يمكن إضافة المزيد من المعالجة هنا للطلبات المقبولة
-                    pass
-                
-                # حذف من الطلبات المعلقة
-                del pending_requests[request_id]
             
-            if user_id in user_requests and request_id in user_requests[user_id]:
-                user_requests[user_id][request_id].update(updates)
-        
-        return True
+            # الحصول على الاسم لإرسال الإشعار
+            doc = user_ref.get()
+            martyr_name = doc.to_dict().get('martyr_data', {}).get('full_name', 'غير محدد')
+            send_telegram_message(str(user_id), f"<b>😔 عذراً،</b>\n\nتم رفض طلبك لإضافة الشهيد <b>{martyr_name}</b>.\n\nيمكنك تقديم طلب جديد بعد مراجعة البيانات والتأكد من صحتها.\n\nللاستفسار تواصل مع: @DevYouns")
+            return True
+            
     except Exception as e:
         logger.error(f"Error updating request status: {e}")
         return False
 
-# دوال Telegram المحسنة
+
+# دوال Telegram
 def send_telegram_message(chat_id, text=None, reply_markup=None, photo_id=None, photo_caption=None):
     """دالة موحدة لإرسال الرسائل والصور"""
     url = TELEGRAM_API_URL
@@ -339,22 +371,23 @@ def show_help(chat_id):
     send_telegram_message(chat_id, help_text, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
 
 def show_user_requests(chat_id, user_id):
-    """عرض طلبات المستخدم"""
+    """عرض طلبات المستخدم من Firestore"""
+    if not is_firebase_ready():
+        send_telegram_message(chat_id, "⚠️ لا يمكن الاتصال بقاعدة البيانات حالياً.")
+        return
+
     try:
-        user_reqs = {}
+        user_requests_ref = admin_db.collection(USER_REQUESTS_COLLECTION).document(str(user_id)).collection('requests')
+        docs = user_requests_ref.stream()
+
+        requests_list = [doc.to_dict() for doc in docs]
         
-        if is_firebase_ready():
-            ref = db.reference(f'user_requests/{user_id}')
-            user_reqs = ref.get() or {}
-        else:
-            user_reqs = user_requests.get(user_id, {})
-        
-        if not user_reqs:
+        if not requests_list:
             send_telegram_message(chat_id, "📭 لا توجد طلبات مقدمة من قبلك حتى الآن", reply_markup=get_keyboard(['إضافة شهيد جديد']))
             return
         
         requests_text = "<b>📋 طلباتك المقدمة:</b>\n\n"
-        for req_id, req_data in user_reqs.items():
+        for req_data in requests_list:
             martyr_name = req_data.get('martyr_data', {}).get('full_name', 'غير محدد')
             status = req_data.get('status', 'pending')
             created_at = req_data.get('created_at', 'غير محدد')
@@ -380,6 +413,7 @@ def show_user_requests(chat_id, user_id):
     except Exception as e:
         logger.error(f"Error showing user requests: {e}")
         send_telegram_message(chat_id, "حدث خطأ في عرض طلباتك", reply_markup=get_keyboard(['إضافة شهيد جديد']))
+
 
 def start_upload_process(chat_id, user_id, user_info):
     """بدء عملية إضافة شهيد"""
@@ -496,13 +530,20 @@ def complete_request(chat_id, user_id, session):
     
     request_data = {
         'martyr_data': {
-            **martyr_data,
+            'name_first': martyr_data.get('first_name', ''),
+            'name_father': martyr_data.get('father_name', ''),
+            'name_family': martyr_data.get('family_name', ''),
             'full_name': full_name,
-            'timestamp': datetime.now().isoformat()
+            'age': martyr_data.get('age', None),
+            'date_birth': martyr_data.get('birth_date', ''),
+            'date_martyrdom': martyr_data.get('martyrdom_date', ''),
+            'place': martyr_data.get('place', ''),
+            'imageUrl': f"https://api.telegram.org/file/bot{BOT_TOKEN}/photos/{martyr_data.get('photo_file_id', '')}",
         },
         'user_info': session['user_info'],
         'status': 'pending',
-        'created_at': datetime.now().isoformat()
+        'created_at': datetime.now().isoformat(),
+        'userId': str(user_id)
     }
     
     request_id = save_request(user_id, request_data)
@@ -538,14 +579,13 @@ def complete_request(chat_id, user_id, session):
 # --- دوال الإدارة ---
 def review_pending_requests(chat_id):
     """دالة مراجعة الطلبات المعلقة"""
+    if not is_firebase_ready():
+        send_telegram_message(chat_id, "⚠️ لا يمكن الاتصال بقاعدة البيانات حالياً.")
+        return
+
     try:
-        requests_data = {}
-        
-        if is_firebase_ready():
-            ref = db.reference('pending_requests')
-            requests_data = ref.get() or {}
-        else:
-            requests_data = pending_requests
+        docs = admin_db.collection(PENDING_REQUESTS_COLLECTION).stream()
+        requests_data = {doc.id: doc.to_dict() for doc in docs}
 
         if not requests_data:
             send_telegram_message(chat_id, "لا توجد طلبات معلقة للمراجعة في الوقت الحالي.")
@@ -554,11 +594,16 @@ def review_pending_requests(chat_id):
         for request_id, request_info in requests_data.items():
             martyr_data = request_info.get('martyr_data', {})
             user_info = request_info.get('user_info', {})
-            user_id_req = user_info.get('telegram_id', 'غير معروف')
+            user_id_req = request_info.get('userId', 'غير معروف')
 
-            summary = f"<b>طلب جديد للمراجعة</b>\n\n<b>ID:</b> <code>{request_id}</code>\n<b>الاسم:</b> {martyr_data.get('full_name', 'غير محدد')}\n<b>العمر:</b> {martyr_data.get('age', 'غير متوفر')}\n<b>تاريخ الولادة:</b> {martyr_data.get('birth_date', 'غير متوفر')}\n<b>تاريخ الاستشهاد:</b> {martyr_data.get('martyrdom_date', 'غير متوفر')}\n<b>مكان الاستشهاد:</b> {martyr_data.get('place', 'غير متوفر')}\n\n<b>مقدم الطلب:</b> {user_info.get('first_name', '')} {user_info.get('last_name', '')} (@{user_info.get('username', '')})\n<b>ID المستخدم:</b> <code>{user_id_req}</code>"
+            summary = f"<b>طلب جديد للمراجعة</b>\n\n<b>ID:</b> <code>{request_id}</code>\n<b>الاسم:</b> {martyr_data.get('full_name', 'غير محدد')}\n<b>العمر:</b> {martyr_data.get('age', 'غير متوفر')}\n<b>تاريخ الولادة:</b> {martyr_data.get('date_birth', 'غير متوفر')}\n<b>تاريخ الاستشهاد:</b> {martyr_data.get('date_martyrdom', 'غير متوفر')}\n<b>مكان الاستشهاد:</b> {martyr_data.get('place', 'غير متوفر')}\n\n<b>مقدم الطلب:</b> {user_info.get('first_name', '')} {user_info.get('last_name', '')} (@{user_info.get('username', '')})\n<b>ID المستخدم:</b> <code>{user_id_req}</code>"
 
-            photo_id = martyr_data.get('photo_file_id')
+            photo_url = martyr_data.get('imageUrl')
+            if photo_url and "photos" in photo_url: # التحقق من أن الرابط هو رابط تيليجرام
+                # استخراج file_id من الرابط
+                photo_file_id = photo_url.split('/')[-1]
+            else:
+                photo_file_id = None
             
             # إنشاء لوحة مفاتيح للقبول والرفض
             inline_keyboard = get_inline_keyboard([
@@ -566,8 +611,8 @@ def review_pending_requests(chat_id):
                 {'text': '❌ رفض', 'callback_data': f'reject_{request_id}_{user_id_req}'}
             ])
 
-            if photo_id:
-                send_telegram_message(chat_id, photo_id=photo_id, photo_caption=summary, reply_markup=inline_keyboard)
+            if photo_file_id:
+                send_telegram_message(chat_id, photo_id=photo_file_id, photo_caption=summary, reply_markup=inline_keyboard)
             else:
                 send_telegram_message(chat_id, text=summary, reply_markup=inline_keyboard)
     
@@ -578,18 +623,8 @@ def review_pending_requests(chat_id):
 def approve_request(chat_id, request_id, user_id_req):
     """دالة لقبول طلب"""
     try:
-        # الحصول على بيانات الطلب أولاً
-        martyr_name = "غير محدد"
-        if is_firebase_ready():
-            ref = db.reference(f'user_requests/{user_id_req}/{request_id}/martyr_data/full_name')
-            martyr_name = ref.get() or "غير محدد"
-        else:
-            if user_id_req in user_requests and request_id in user_requests[user_id_req]:
-                martyr_name = user_requests[user_id_req][request_id].get('martyr_data', {}).get('full_name', 'غير محدد')
-        
         if update_request_status(request_id, 'approved', user_id_req):
             send_telegram_message(chat_id, f"✅ تم قبول الطلب <code>{request_id}</code> بنجاح.")
-            send_telegram_message(user_id_req, f"<b>🎉 تهانينا!</b>\n\nتم قبول طلبك لإضافة الشهيد <b>{martyr_name}</b>.\n\nشكراً لك على مساهمتك في حفظ ذكرى شهدائنا الأبرار.")
         else:
             send_telegram_message(chat_id, f"❌ حدث خطأ في قبول الطلب <code>{request_id}</code>.")
     except Exception as e:
@@ -599,18 +634,8 @@ def approve_request(chat_id, request_id, user_id_req):
 def reject_request(chat_id, request_id, user_id_req):
     """دالة لرفض طلب"""
     try:
-        # الحصول على بيانات الطلب أولاً
-        martyr_name = "غير محدد"
-        if is_firebase_ready():
-            ref = db.reference(f'user_requests/{user_id_req}/{request_id}/martyr_data/full_name')
-            martyr_name = ref.get() or "غير محدد"
-        else:
-            if user_id_req in user_requests and request_id in user_requests[user_id_req]:
-                martyr_name = user_requests[user_id_req][request_id].get('martyr_data', {}).get('full_name', 'غير محدد')
-        
         if update_request_status(request_id, 'rejected', user_id_req):
             send_telegram_message(chat_id, f"❌ تم رفض الطلب <code>{request_id}</code> بنجاح.")
-            send_telegram_message(user_id_req, f"<b>😔 عذراً،</b>\n\nتم رفض طلبك لإضافة الشهيد <b>{martyr_name}</b>.\n\nيمكنك تقديم طلب جديد بعد مراجعة البيانات والتأكد من صحتها.\n\nللاستفسار تواصل مع: @DevYouns")
         else:
             send_telegram_message(chat_id, f"❌ حدث خطأ في رفض الطلب <code>{request_id}</code>.")
     except Exception as e:
@@ -713,56 +738,6 @@ def webhook():
     except Exception as e:
         logger.error(f"Error processing update: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/set_webhook', methods=['GET'])
-def set_webhook():
-    """تعيين webhook للبوت"""
-    webhook_url = "https://smgallery.onrender.com/webhook"
-    
-    try:
-        url = f"{TELEGRAM_API_URL}setWebhook"
-        payload = {'url': webhook_url}
-        response = requests.post(url, json=payload)
-        result = response.json()
-        
-        if result.get('ok'):
-            return jsonify({
-                'status': 'success',
-                'message': 'Webhook set successfully',
-                'webhook_url': webhook_url,
-                'result': result
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to set webhook',
-                'error': result
-            }), 400
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Error setting webhook: {str(e)}'
-        }), 500
-
-@app.route('/webhook_info', methods=['GET'])
-def webhook_info():
-    """معلومات webhook الحالي"""
-    try:
-        url = f"{TELEGRAM_API_URL}getWebhookInfo"
-        response = requests.get(url)
-        result = response.json()
-        
-        return jsonify({
-            'status': 'ok',
-            'webhook_info': result
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Error getting webhook info: {str(e)}'
-        }), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
