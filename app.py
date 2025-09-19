@@ -25,50 +25,44 @@ firebase_initialized = False
 admin_db = None
 view_db = None
 
-# اسم ملف مفتاح الخدمة
-ADMIN_CREDENTIALS_FILE = 'syriancoastmartyrsadmin.json'
-VIEW_CREDENTIALS_FILE = 'syriancoastmartyrs.json'
-
 try:
-    # استخدام متغيرات البيئة بدلاً من الملفات
-    admin_cred_json = os.environ.get('FIREBASE_ADMIN_CREDENTIALS')
-    view_cred_json = os.environ.get('FIREBASE_VIEW_CREDENTIALS')
+    # استخدام مفاتيح الخدمة المباشرة بدون قراءة ملفات JSON
+    # قم بتعديل هذا الجزء ليتناسب مع مفتاحك الخاص
+    admin_cred = credentials.Certificate({
+        "type": "service_account",
+        "project_id": "syriancoastmartyrsadmin",
+        "private_key_id": "9aa88a56ddc8affa4324daeff189f7f4fcfe2c44",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCuRXRr3kp/NrUb\nXpXknc2zamahP7n8yYY1HsBjivqCWhUOwM8N5rqsvjUmDKG/d42yCMXa4yzzP7Be\nYo7Nk0AmJqwHUBf6bBMu4rs6VYLdmuZDTns9WQthX4uE0zqTAcfrfm81KlqWWqAg\nl77UI4ZTnyO8kC20GEuzYaK984Yfj8AhTvZyYL95f4zSX0xZ9BlWWh1hLjO3ShZA\nCuC4wemmfJ4hUbISHR8uTxaCMAmIBBT9M4LL+ICiLx36AjwxO64PhixlbKuzIGeB\nNVHkRWbQszgvJXgqFHH4471KShIMWac8R7bUgM/fmGuBF4vXZda4/EAsryf4Nx8t\nojHdbPm5AgMBAAECggEADOZW/2+TSd6fsgySsZslOXNGMMgt8RptOOQjd1LXp3u5\nzI9k3Dlwpr4HIt+DPxAfUNcBp0nS31ge6uOmgKzWTiSlbf6loburgVhW5dLj1pnD\nUubdrD05wI3RHuZAUxaqCOJhYrj1fuTrLrJw1ZTiGfFBFNGC0o6MVvVClccvjckn\nrtfIRgEyezT2o21MPD5BlBgE+sR0jybeMi95F5qCkzPMMpv7jBWbuAsLuj+0RvCe\ndpgCRUBzGBwpWtEjhIuwvHB2l3ml94vf4OmwKmYnjpWEmKLDOqKHTp9qubHPgkTj\ndHzxXptW8oVFPr72UpBQ0yRZ2ExUgqLzzS7sSTjAQQKBgQDqKm6Dp/aDZtrzHzR0\no5wHoi0oKpsDeg//miiI2/i6XNbQUMhzaOz/eVJD39KE55QpZ56GCgEVfX0Jto/r\nWIFvDLzrRZpmgDNDaT4fBCs0TLJM19GoVGEgFbVwgQSvwfAgT0VBg01/QGw1PQGG\n8kWhezDwAjz1rgDAdJQVxeWFwQKBgQC+hVWpEhEUDrbkz/bLhRvfhrigV4OmXKtS\n50JCl3IVOi3hRAXqS7+Np454a1449wOQ8DzmQ2wtLh1wA5f6EVVg+AzEWZLNfzBt\npe/EXHXxRxuyowq0U5lfZu6qcwcXBX3kO1+sS65wzMFtsdiM2HrUJq190XpJgtFx\nD3Fp5vAh+QKBgDnFuDhhMy+eK7y54S45w2Aawftb75y++717Ii8J3mbUSudgVuQq\nafZpz0MRsJW7sNE6UGEPjM7pg/TmhsFwt5ZXVTDSnlJVpNAn4fyzAZnIpmDRClf2\nYXQSBw63thlKxtyh0htksrUHhurnnz3U/hrmEt/UHYgbovHYkUSB66vBAoGBAJ2B\nVYPkr8HJOGKJmxo9/QEaO2AzeV77lZeAIEM1ONdbtbpZphpAbSgKsbnT6Z1meMhG\nE9K5QqFHUobcMbRGyDLWXpelBbxlvf+oA0RuvAKwKrHQIHVb95vrWLwJRH8/xwf8\nHegu2RPf8rlhIgmunjztjNhLabGEOOojPjuy9CrhAoGAbDalKGw+HiysPBZ6fiD6\n15BEWPaPVufbIAqysw8/5OB3BfWQYvH+MpIM2OH34kE6mpsxb1t572PSxtcDaDtS\nFuvRR6s4vkH+xYEy2A1DIPkxWqruiTxrU9skgJEVcdyDXt76tdG+Y1vio3c/b29p\nc6DCgqqlbtSR85MuhSQALAM=\n-----END PRIVATE KEY-----\n",
+        "client_email": "firebase-adminsdk-fbsvc@syriancoastmartyrsadmin.iam.gserviceaccount.com",
+        "client_id": "107057650899785047130",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40syriancoastmartyrsadmin.iam.gserviceaccount.com",
+        "universe_domain": "googleapis.com"
+    })
+    admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
+    admin_db = firestore.client(admin_app)
+    logger.info("Admin Firebase app initialized successfully.")
 
-    if admin_cred_json and view_cred_json:
-        # تهيئة تطبيق قاعدة بيانات الإدارة
-        admin_cred_dict = json.loads(admin_cred_json)
-        admin_cred = credentials.Certificate(admin_cred_dict)
-        admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
-        admin_db = firestore.client(admin_app)
-        logger.info("Admin Firebase app initialized successfully from environment variables.")
+    view_cred = credentials.Certificate({
+        "type": "service_account",
+        "project_id": "syriancoastmartyrs",
+        "private_key_id": "d58a2875deff1d3911329a3c92ffeca23b867f6d",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDm/GZhDBXaxjMt\nf256D4dTUDVkxn3atI1Nv7x5BvdRGK1A6qzez8n3KbjkPM4BV+n7jt+a+eFTavDd\neEFoNMBrRcEuZQZejv9rVX76n+lo7rH0Oe+z/DkvUWBFz1otiUnyurId7JDoYFxI\nmUEV4o3HI9QkJBpIbRrfzxMZEqVUVytmSz/d19nqRLVUJTuYG9UDj6Tc1fHUx4Dh\nxQDmmlCEstX+eATFVb9QrZvf5RbPqZN/zPjGhrcgTapRdkwvf8Ii3OhmZx8dgkrC\nvfqxL31O0+xlIriv1Eo0ppMAzL8s20X5Ciw6sSGXUxd7xhLDKMTCukDCxZ6oZVzy\nxsnuwsM9AgMBAAECggEADc+QlYPh+KM6IyHH6r9r8XTNxHlDxCRggIIS1E+w0OX/\nUe7WKDpXUpJpjif+j0EA6fwYbY08Rj8SKMPMcV0aFi/lBY+fyl6Vcgb6ISUXkSEY\nfchLB0Fw793XOkVUGH3pcHxuMvDWlzZPvj1/kT3rCTmgsQqBkcwIO9KHS0v8m6a/\niC7jhS+SFQPSU2PihlvZaH1xUg3pGOkR84ZUeIxKOckcLbQJnJbnIOuSh6zKbrX8\n0k6IpQTF6UNjV5NfoD+zTDeF93X46tzEi26tiD+fofqUgwaVkfZtr9c2OTSHA2ma\nV41+pklgsRO9Pt7pcWzYixFefu/53bIOlIgpwmk/VwKBgQD5rGF4/WkVLoJravU1\nnhNommtN3Lrqg9y2Pcavt2TwrvFt69gFkH4cHHmwBIa16xAB5SAnZeibEyVQimIL\nYngq5iBoKYfqiwRaG0WR8BUbQSygFcimFXyyarZUXdDF4DhioUDWxacWcak2Bu03\nR2/yS5letjl4iHv+jDz5GCAsGwKBgQDs1stzLsI+gUs7sAJUbGc78g2VlnuT/FXH\nwoRxNGKhhT7glpRpp7nlybMwiVMRtieYtMBrnuqNM9jFP+13R3BYn25BQnYxi44E\ngHQAbOGNfelAHmmdfmnHIuS1pIksOpjojypN/bXM7BQnQWvU9fhkMSoficn/Z54W\n2263jOiThwKBgQDRhAq30U/haoofQj5LpD99RDhPuq9QJR+N/wFAa5HVN7l6GLPK\n15o8VNj5EJNLDdr8/B2jci1kFQj3MWldTGCy/zKqtk9MTyRzyPb0pJfRqzubiyw5\n00Y1Ir+mxKNxqdsnSVJz6KFygCcTI3TlMpmKpk4p4JkRwNbsoRp5nflBiQKBgQDa\nFy0/wrYSEsNxkjGDBlPF6q5BqlHfwwRGr8N/7ypH7EgrTd4asN3JUQQV1M7Ox3sM\n7p0mPS9lmXGqqaSFKx60LRO9OnNWSlkboiGv5pOI1II+jgLZiXfkbShIb9v1A3yc\n4oClUtTfgCFKyL6AW4RA1tkgM6Tz8Lmt+KCqmzHr7wKBgEdKwtjMQAZGUFDff7d0\nlwuoT/xvf6d9uGfc0EY6B8L2zKYw4YbitJeLiU319iNOrUBkEmcNX+uGUwc68ark\nkY8CLXzu6n+IIwGG00p6GKjnhsi79hA7JbFziV9uKUVaRWqB954c3nVjR8A2EJiU\n6usMuTwl+tN56jQuqWgmzTKZ\n-----END PRIVATE KEY-----\n",
+        "client_email": "firebase-adminsdk-fbsvc@syriancoastmartyrs.iam.gserviceaccount.com",
+        "client_id": "100547372818601414941",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40syriancoastmartyrs.iam.gserviceaccount.com",
+        "universe_domain": "googleapis.com"
+    })
+    view_app = firebase_admin.initialize_app(view_cred, name='view_app')
+    view_db = firestore.client(view_app)
+    logger.info("View Firebase app initialized successfully.")
 
-        # تهيئة تطبيق قاعدة بيانات الموقع
-        view_cred_dict = json.loads(view_cred_json)
-        view_cred = credentials.Certificate(view_cred_dict)
-        view_app = firebase_admin.initialize_app(view_cred, name='view_app')
-        view_db = firestore.client(view_app)
-        logger.info("View Firebase app initialized successfully from environment variables.")
-        
-        firebase_initialized = True
-    else:
-        # حالة عدم وجود متغيرات البيئة، يتم استخدام الملفات المحلية (للتطوير)
-        if os.path.exists(ADMIN_CREDENTIALS_FILE):
-            admin_cred = credentials.Certificate(ADMIN_CREDENTIALS_FILE)
-            admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
-            admin_db = firestore.client(admin_app)
-            logger.info("Admin Firebase app initialized successfully from local file.")
-        else:
-            logger.error(f"Admin credentials file '{ADMIN_CREDENTIALS_FILE}' not found.")
-
-        if os.path.exists(VIEW_CREDENTIALS_FILE):
-            view_cred = credentials.Certificate(VIEW_CREDENTIALS_FILE)
-            view_app = firebase_admin.initialize_app(view_cred, name='view_app')
-            view_db = firestore.client(view_app)
-            logger.info("View Firebase app initialized successfully from local file.")
-        else:
-            logger.error(f"View credentials file '{VIEW_CREDENTIALS_FILE}' not found.")
-            
-        firebase_initialized = True if admin_db and view_db else False
+    firebase_initialized = True
 
 except Exception as e:
     logger.error(f"Firebase initialization failed: {e}")
