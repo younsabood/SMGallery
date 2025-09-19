@@ -25,50 +25,51 @@ firebase_initialized = False
 admin_db = None
 view_db = None
 
-# إعدادات قاعدة بيانات الإدارة
-admin_config = {
-    "apiKey": "AIzaSyBOVkRVadpm0-jAv8wmyIhkAfPFf6NXMAI",
-    "authDomain": "syriancoastmartyrsadmin.firebaseapp.com",
-    "projectId": "syriancoastmartyrsadmin",
-    "storageBucket": "syriancoastmartyrsadmin.firebasestorage.app",
-    "messagingSenderId": "87419736688",
-    "appId": "1:87419736688:web:eaf9a9abf1472542f81ab5",
-    "measurementId": "G-JX5P16CKKG"
-}
-
-# إعدادات قاعدة بيانات الموقع
-view_config = {
-    "apiKey": "AIzaSyCL5FbARVnYViuO4VOP9yZmUXyQEy81df8",
-    "authDomain": "syriancoastmartyrs.firebaseapp.com",
-    "projectId": "syriancoastmartyrs",
-    "storageBucket": "syriancoastmartyrs.firebasestorage.app",
-    "messagingSenderId": "950493318163",
-    "appId": "1:950493318163:web:0a8724c4fbc2292de403e6",
-    "measurementId": "G-TVDMHHHLPT"
-}
-
 # اسم ملف مفتاح الخدمة
-ADMIN_CREDENTIALS_FILE = 'scmtadmin-firebase-adminsdk-fbsvc-35394bb17a.json'
-VIEW_CREDENTIALS_FILE = 'scmtview-firebase-adminsdk-fbsvc-0a8724c4fbc2292de403e6.json'
+ADMIN_CREDENTIALS_FILE = 'syriancoastmartyrsadmin.json'
+VIEW_CREDENTIALS_FILE = 'syriancoastmartyrs.json'
 
 try:
-    if os.path.exists(ADMIN_CREDENTIALS_FILE):
-        admin_cred = credentials.Certificate(ADMIN_CREDENTIALS_FILE)
+    # استخدام متغيرات البيئة بدلاً من الملفات
+    admin_cred_json = os.environ.get('FIREBASE_ADMIN_CREDENTIALS')
+    view_cred_json = os.environ.get('FIREBASE_VIEW_CREDENTIALS')
+
+    if admin_cred_json and view_cred_json:
+        # تهيئة تطبيق قاعدة بيانات الإدارة
+        admin_cred_dict = json.loads(admin_cred_json)
+        admin_cred = credentials.Certificate(admin_cred_dict)
         admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
         admin_db = firestore.client(admin_app)
-        logger.info("Admin Firebase app initialized successfully.")
-    else:
-        logger.error(f"Admin credentials file '{ADMIN_CREDENTIALS_FILE}' not found.")
+        logger.info("Admin Firebase app initialized successfully from environment variables.")
 
-    if os.path.exists(VIEW_CREDENTIALS_FILE):
-        view_cred = credentials.Certificate(VIEW_CREDENTIALS_FILE)
+        # تهيئة تطبيق قاعدة بيانات الموقع
+        view_cred_dict = json.loads(view_cred_json)
+        view_cred = credentials.Certificate(view_cred_dict)
         view_app = firebase_admin.initialize_app(view_cred, name='view_app')
         view_db = firestore.client(view_app)
-        logger.info("View Firebase app initialized successfully.")
-    else:
-        logger.error(f"View credentials file '{VIEW_CREDENTIALS_FILE}' not found.")
+        logger.info("View Firebase app initialized successfully from environment variables.")
         
-    firebase_initialized = True
+        firebase_initialized = True
+    else:
+        # حالة عدم وجود متغيرات البيئة، يتم استخدام الملفات المحلية (للتطوير)
+        if os.path.exists(ADMIN_CREDENTIALS_FILE):
+            admin_cred = credentials.Certificate(ADMIN_CREDENTIALS_FILE)
+            admin_app = firebase_admin.initialize_app(admin_cred, name='admin_app')
+            admin_db = firestore.client(admin_app)
+            logger.info("Admin Firebase app initialized successfully from local file.")
+        else:
+            logger.error(f"Admin credentials file '{ADMIN_CREDENTIALS_FILE}' not found.")
+
+        if os.path.exists(VIEW_CREDENTIALS_FILE):
+            view_cred = credentials.Certificate(VIEW_CREDENTIALS_FILE)
+            view_app = firebase_admin.initialize_app(view_cred, name='view_app')
+            view_db = firestore.client(view_app)
+            logger.info("View Firebase app initialized successfully from local file.")
+        else:
+            logger.error(f"View credentials file '{VIEW_CREDENTIALS_FILE}' not found.")
+            
+        firebase_initialized = True if admin_db and view_db else False
+
 except Exception as e:
     logger.error(f"Firebase initialization failed: {e}")
     firebase_initialized = False
