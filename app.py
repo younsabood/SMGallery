@@ -19,24 +19,13 @@ BOT_TOKEN = "8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM"
 ADMIN_USER_ID = "5679396406"
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 
-# إعداد Firebase
-FIREBASE_CONFIG = {
-    "type": "service_account",
-    "project_id": "scmtadmin",
-    "private_key_id": "c1515ad2504f8524f044e83f23eac3ec1085ad29",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCt7Z1LHO4SwIjl\nQ6uO1y+skar15BvPEGnfjNsGyLXdmA4HelIh0kz91ltT3dG70gjpaZc7xuAFlbOO\nw0Y789H4abWKPlS5W5WK3CcviOnBrO5pn2G80ybZa/kLF0atfBtF6oOH5yf/FJrZ\nwCcxSqeutG7/TyQ0dRP5YsMvH81+hWRjpi+289mrGrJrBWDB1ItnIT9MhnpV/uQb\nz0V9gTSLCKUFX3EzqN+S3Svy8xk8180vVPP+dIigLUp3QEfWXNmDDvlgFSFocF9X\n1BR8rAlYd2jLVt1Ww0rfsGzOZjTc6mVJll5wImq01XqKv7NmpARllo6yGg0sJmHi\n1+mBAC4PAgMBAAECggEAEPZABW1C19f9rG4sXaJ6vGz7AT6dFP/YHhG8jS18dFSP\nObIiLw41V/lUWsTNNBtIUeBsUUtp2Yw/QJ2modN7bKsn0IhCTE60MiCaPwvZJXwv\nRrm2bGsjOhz04rIDFd7T7L5G1DV6NGmBWIRheMXREzv21ItBT/mtraqGDSMgL/Bk\n4XE2qevrzaf8Mv+6ZkxH12sZ4ixY5S4mkJpxLBX4KTPo/mKi3v/ZDzE0/Q8OxjPQ\n5JiJEJ0rABqze6X9e7pjBYhIa1IOTAmjytgCUALWB8GpdJaeC7ye0lViEhtjDapw\ncgPr7lSqw1NbTI8uYevGwS5/1C7eSVhWi96659h5oQKBgQDulhzbwpb9bTlp5s4B\nwREx3SO+p0Q7e8ABx6n4HIjKo25xLFOO14vExyWlN6auVBqxWhEuCk+ELxtlFUge\nCGo1IU9DX0E+8MwrdUl+DsD86EQa3mhbFgxUFEr1+DDm2PtYoVTop2C4jJIZwxTO\ntBluJHl5VqUX0v+5R6tFjU30+QKBgQC6n2Pi5xg+vRnK0ETTo89cRldHV/i3b0kf\nGdAn65eo0rDyCk0fT22BKNGpP2wYBshOhnX8+AispS3X/ZZ+EC0QiBGOmxIk7Uvu\nEHpprLQzBt69zOKnb4ZXsASLH+ct4Fv3QAUWT73+a7yHy9Bfg1MLcP61YvxgVoJV\ncflkslNlRwKBgH3nCWOO1E74DIwuGBgk4gYGRI6fhgo9y50k2DTuGeGVTPq8AXwn\nksJMtTjynSrxhwSAGwDIwB1pHnPBP0VZ+3H+Ge3bnnqwZ42nXxj+gCj2CLqFE1y9\nzdOwwb37MxMe/cRPnpcHfKrmw1KE9738nE7bQJ8fcg+YcQo9H8ycPL9BAoGAadVm\nYhFIMJww+lFuFs+5Es1ZRb5f8DcOMrMC1wDGOxlw+3JYFj+HDE5HyEGNXXrLMa0T\nUGihEreB7hGDvO4TgGKKAmNywLpJ6zIxGai1cJKe0uhUSTv35daOXQ+0nNG1ldwa\nhnKmfpg+jIxLGT9yYvSrndYK5d9pfmdqVW7D2JUCgYB6gG63FdlF9ibagO+1te1s\n5x2oF8bDI95U25BvaCeY03WUO1AUySVRknkAGt5qgYZF7gPYcyjmSMTHeIsY+RaC\nBG6obeZCVpLJvHuoowvD510y1d5sys06pr34BLQQBbVI9uhS7lBFxOG8JbKm7clf\nEG72La03nAGCyTNAPHa/4Q==\n-----END PRIVATE KEY-----\n",
-    "client_email": "firebase-adminsdk-fbsvc@scmtadmin.iam.gserviceaccount.com",
-    "client_id": "105793644642190107218",
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-    "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40scmtadmin.iam.gserviceaccount.com",
-    "universe_domain": "googleapis.com"
-}
+# اسم ملف مفتاح الخدمة
+FIREBASE_CONFIG_FILE = 'scmtadmin-firebase-adminsdk-fbsvc-35394bb17a.json'
 
 # تهيئة Firebase
 try:
-    cred = credentials.Certificate(FIREBASE_CONFIG)
+    # قراءة مفتاح الخدمة من ملف JSON
+    cred = credentials.Certificate(FIREBASE_CONFIG_FILE)
     firebase_admin.initialize_app(cred, {
         'databaseURL': 'https://scmtadmin-default-rtdb.firebaseio.com/'
     })
