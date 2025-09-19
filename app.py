@@ -12,8 +12,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # إعداد Flask
-# تم تغيير اسم الملف من Bot.py إلى app.py ليتوافق مع الإعدادات الافتراضية لخادم Gunicorn على Render.
-# الآن، Gunicorn سيتمكن من العثور على التطبيق.
 app = Flask(__name__)
 
 # إعدادات البوت
@@ -143,6 +141,27 @@ def send_photo(chat_id, photo, caption="", reply_markup=None):
     except Exception as e:
         logger.error(f"Error sending photo: {e}")
         return None
+        
+def get_file_url(file_id):
+    """الحصول على رابط ملف من Telegram"""
+    url = TELEGRAM_API_URL + "getFile"
+    data = {'file_id': file_id}
+    try:
+        response = requests.get(url, data=data, timeout=10)
+        file_path = response.json()['result']['file_path']
+        return f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+    except Exception as e:
+        logger.error(f"Error getting file URL: {e}")
+        return None
+
+def get_keyboard(buttons):
+    """تكوين لوحة مفاتيح تفاعلية"""
+    keyboard = [[{'text': btn}] for btn in buttons]
+    return {
+        'keyboard': keyboard,
+        'resize_keyboard': True,
+        'one_time_keyboard': True
+    }
 
 # معالج الرسائل النصية
 def handle_text_message(chat_id, user_id, text, user_info):
@@ -155,25 +174,26 @@ def handle_text_message(chat_id, user_id, text, user_info):
 رحمهم الله وأسكنهم فسيح جناته
 
 📋 الأوامر المتاحة:
-• /upload - إضافة شهيد جديد
-• /my_requests - عرض طلباتي
-• /help - المساعدة
+• إضافة شهيد جديد
+• عرض طلباتي
+• المساعدة
 
-لبدء إضافة شهيد جديد، اضغط على /upload"""
-        send_message(chat_id, welcome_text)
+لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>"""
+        keyboard = get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+        send_message(chat_id, welcome_text, reply_markup=keyboard)
         
-    elif text == '/upload':
+    elif text == 'إضافة شهيد جديد' or text == '/upload':
         start_upload_process(chat_id, user_id, user_info)
         
-    elif text == '/help':
+    elif text == 'مساعدة' or text == '/help':
         show_help(chat_id)
         
-    elif text == '/my_requests':
+    elif text == 'عرض طلباتي' or text == '/my_requests':
         show_user_requests(chat_id, user_id)
         
-    elif text == '/cancel':
+    elif text == 'إلغاء' or text == '/cancel':
         clear_user_session(user_id)
-        send_message(chat_id, "❌ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام /upload")
+        send_message(chat_id, "❌ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام <b>إضافة شهيد جديد</b>", reply_markup=get_keyboard(['إضافة شهيد جديد']))
         
     else:
         handle_user_input(chat_id, user_id, text)
@@ -188,16 +208,16 @@ def start_upload_process(chat_id, user_id, user_info):
     }
     
     if save_user_session(user_id, session_data):
-        send_message(chat_id, "📝 لنبدأ بإضافة شهيد جديد\n\n1️⃣ الرجاء إدخال الاسم الأول:")
+        send_message(chat_id, "📝 لنبدأ بإضافة شهيد جديد\n\n1️⃣ الرجاء إدخال الاسم الأول:", reply_markup=get_keyboard(['إلغاء']))
     else:
-        send_message(chat_id, "حدث خطأ، يرجى المحاولة مرة أخرى")
+        send_message(chat_id, "حدث خطأ، يرجى المحاولة مرة أخرى", reply_markup=get_keyboard(['إضافة شهيد جديد']))
 
 def handle_user_input(chat_id, user_id, text):
     """معالجة إدخال المستخدم حسب الحالة"""
     session = get_user_session(user_id)
     
     if session['state'] == STATES['IDLE']:
-        send_message(chat_id, "لا توجد عملية جارية. استخدم /upload لبدء إضافة شهيد جديد")
+        send_message(chat_id, "لا توجد عملية جارية. استخدم <b>إضافة شهيد جديد</b> لبدء الإضافة", reply_markup=get_keyboard(['إضافة شهيد جديد']))
         return
     
     if session['state'] == STATES['WAITING_FIRST_NAME']:
@@ -207,7 +227,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['first_name'] = text.strip()
         session['state'] = STATES['WAITING_FATHER_NAME']
         save_user_session(user_id, session)
-        send_message(chat_id, "2️⃣ الرجاء إدخال اسم الأب:")
+        send_message(chat_id, "2️⃣ الرجاء إدخال اسم الأب:", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_FATHER_NAME']:
         if not text.strip():
@@ -216,7 +236,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['father_name'] = text.strip()
         session['state'] = STATES['WAITING_FAMILY_NAME']
         save_user_session(user_id, session)
-        send_message(chat_id, "3️⃣ الرجاء إدخال اسم العائلة:")
+        send_message(chat_id, "3️⃣ الرجاء إدخال اسم العائلة:", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_FAMILY_NAME']:
         if not text.strip():
@@ -225,7 +245,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['family_name'] = text.strip()
         session['state'] = STATES['WAITING_AGE']
         save_user_session(user_id, session)
-        send_message(chat_id, "4️⃣ الرجاء إدخال عمر الشهيد:")
+        send_message(chat_id, "4️⃣ الرجاء إدخال عمر الشهيد:", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_AGE']:
         try:
@@ -240,7 +260,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['age'] = age
         session['state'] = STATES['WAITING_BIRTH_DATE']
         save_user_session(user_id, session)
-        send_message(chat_id, "5️⃣ الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):")
+        send_message(chat_id, "5️⃣ الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_BIRTH_DATE']:
         if not text.strip():
@@ -249,7 +269,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['birth_date'] = text.strip()
         session['state'] = STATES['WAITING_MARTYRDOM_DATE']
         save_user_session(user_id, session)
-        send_message(chat_id, "6️⃣ الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):")
+        send_message(chat_id, "6️⃣ الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_MARTYRDOM_DATE']:
         if not text.strip():
@@ -258,7 +278,7 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['martyrdom_date'] = text.strip()
         session['state'] = STATES['WAITING_PLACE']
         save_user_session(user_id, session)
-        send_message(chat_id, "7️⃣ الرجاء إدخال مكان الاستشهاد:")
+        send_message(chat_id, "7️⃣ الرجاء إدخال مكان الاستشهاد:", reply_markup=get_keyboard(['إلغاء']))
         
     elif session['state'] == STATES['WAITING_PLACE']:
         if not text.strip():
@@ -267,19 +287,20 @@ def handle_user_input(chat_id, user_id, text):
         session['data']['place'] = text.strip()
         session['state'] = STATES['WAITING_PHOTO']
         save_user_session(user_id, session)
-        send_message(chat_id, "8️⃣ الرجاء إرسال صورة الشهيد:\n\nيمكنك إضافة تعليق على الصورة إذا رغبت")
+        send_message(chat_id, "8️⃣ الرجاء إرسال صورة الشهيد:\n\nيمكنك إضافة تعليق على الصورة إذا رغبت", reply_markup=get_keyboard(['إلغاء']))
 
 def handle_photo_message(chat_id, user_id, photo_data, caption=""):
     """معالجة الصور"""
     session = get_user_session(user_id)
     
     if session['state'] != STATES['WAITING_PHOTO']:
-        send_message(chat_id, "📸 يرجى اتباع الخطوات بالترتيب\n\nاستخدم /upload لبدء إضافة شهيد جديد")
+        send_message(chat_id, "📸 يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة", reply_markup=get_keyboard(['إضافة شهيد جديد']))
         return
     
     # أخذ أكبر حجم صورة
     photo = photo_data[-1]
-    session['data']['photo_file_id'] = photo['file_id']
+    photo_file_id = photo['file_id']
+    session['data']['photo_file_id'] = photo_file_id
     session['data']['photo_caption'] = caption
     
     # إنهاء الطلب
@@ -288,11 +309,12 @@ def handle_photo_message(chat_id, user_id, photo_data, caption=""):
 def complete_request(chat_id, user_id, session):
     """إكمال الطلب وحفظه"""
     # تكوين الاسم الكامل
-    full_name = f"{session['data']['first_name']} {session['data']['father_name']} {session['data']['family_name']}"
+    martyr_data = session['data']
+    full_name = f"{martyr_data.get('first_name', '')} {martyr_data.get('father_name', '')} {martyr_data.get('family_name', '')}"
     
     request_data = {
         'martyr_data': {
-            **session['data'],
+            **martyr_data,
             'full_name': full_name,
             'timestamp': datetime.now().isoformat()
         },
@@ -306,21 +328,32 @@ def complete_request(chat_id, user_id, session):
     if request_id:
         clear_user_session(user_id)
         
-        message = f"""✅ تم إرسال طلبك بنجاح!
+        # إنشاء الرسالة الملخص مع الصورة
+        message_summary = f"""✅ تم إرسال طلبك بنجاح!
 
 📋 ملخص البيانات:
 👤 الاسم: {full_name}
-🎂 العمر: {session['data']['age']}
-📅 الولادة: {session['data']['birth_date']}
-🕊️ الاستشهاد: {session['data']['martyrdom_date']}
-📍 المكان: {session['data']['place']}
+🎂 العمر: {martyr_data.get('age', 'غير متوفر')}
+📅 الولادة: {martyr_data.get('birth_date', 'غير متوفر')}
+🕊️ الاستشهاد: {martyr_data.get('martyrdom_date', 'غير متوفر')}
+📍 المكان: {martyr_data.get('place', 'غير متوفر')}
 
 ⏳ سيتم مراجعة طلبك من قبل الإدارة
-📱 يمكنك متابعة حالة طلبك باستخدام /my_requests"""
+📱 يمكنك متابعة حالة طلبك باستخدام <b>عرض طلباتي</b>"""
         
-        send_message(chat_id, message)
+        # إرسال الصورة والرسالة في نفس الوقت (إذا أمكن)
+        photo_file_id = martyr_data.get('photo_file_id')
+        if photo_file_id:
+            try:
+                send_photo(chat_id, photo_file_id, caption=message_summary, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
+            except Exception as e:
+                logger.error(f"Error sending photo with summary: {e}")
+                send_message(chat_id, message_summary, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
+        else:
+            send_message(chat_id, message_summary, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
+
     else:
-        send_message(chat_id, "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى")
+        send_message(chat_id, "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى", reply_markup=get_keyboard(['إضافة شهيد جديد']))
 
 def show_help(chat_id):
     """عرض المساعدة"""
@@ -329,10 +362,10 @@ def show_help(chat_id):
 📋 الأوامر المتاحة:
 
 🔹 /start - الترحيب والبدء
-🔹 /upload - إضافة شهيد جديد
-🔹 /my_requests - عرض طلباتي
-🔹 /cancel - إلغاء العملية الحالية
-🔹 /help - عرض هذه المساعدة
+🔹 إضافة شهيد جديد - بدء عملية الإضافة
+🔹 عرض طلباتي - عرض حالة طلباتك
+🔹 إلغاء - إلغاء العملية الحالية
+🔹 مساعدة - عرض هذه المساعدة
 
 📝 خطوات إضافة شهيد:
 1️⃣ الاسم الأول
@@ -346,7 +379,7 @@ def show_help(chat_id):
 
 ⏳ جميع الطلبات تخضع لمراجعة الإدارة قبل النشر"""
     
-    send_message(chat_id, help_text)
+    send_message(chat_id, help_text, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة']))
 
 def show_user_requests(chat_id, user_id):
     """عرض طلبات المستخدم"""
@@ -355,7 +388,7 @@ def show_user_requests(chat_id, user_id):
         requests_data = ref.get()
         
         if not requests_data:
-            send_message(chat_id, "📍 لم تقم بتقديم أي طلبات حتى الآن\n\nلإضافة شهيد جديد استخدم /upload")
+            send_message(chat_id, "📍 لم تقم بتقديم أي طلبات حتى الآن\n\nلإضافة شهيد جديد استخدم <b>إضافة شهيد جديد</b>", reply_markup=get_keyboard(['إضافة شهيد جديد']))
             return
         
         message = "📋 طلباتك:\n\n"
@@ -372,11 +405,11 @@ def show_user_requests(chat_id, user_id):
             full_name = request_data.get('martyr_data', {}).get('full_name', 'غير محدد')
             message += f"{count}. {full_name} - {status_emoji}\n"
         
-        send_message(chat_id, message)
+        send_message(chat_id, message, reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
         
     except Exception as e:
         logger.error(f"Error showing user requests: {e}")
-        send_message(chat_id, "حدث خطأ في استرجاع الطلبات")
+        send_message(chat_id, "حدث خطأ في استرجاع الطلبات", reply_markup=get_keyboard(['إضافة شهيد جديد', 'عرض طلباتي']))
 
 # Routes Flask
 @app.route('/', methods=['GET'])
