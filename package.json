@@ -1,5 +1,5 @@
 {
-  "name": "syrian-martyrs-bot",
+  "name": "botdata",
   "version": "1.0.0",
   "description": "A Telegram bot for the Syrian Martyrs database.",
   "main": "src/index.js",
