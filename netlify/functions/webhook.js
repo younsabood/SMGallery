@@ -5,7 +5,7 @@ const axios = require('axios');
 // Configuration
 // Use environment variables from Netlify, with fallback values for local development
 const BOT_TOKEN = process.env.BOT_TOKEN || '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/syrian_martyrs?retryWrites=true&w=majority&appName=Younss';
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '7b98d38c418169cf635290b4a31f8e95';
 
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
