@@ -79,9 +79,9 @@ userSessionSchema.index({ updatedAt: 1 });
 
 
 // Models
-const UserSession = mongoose.model('UserSession', userSessionSchema);
-const Martyr = mongoose.model('Martyr', martyrSchema);
-const Request = mongoose.model('Request', requestSchema);
+const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
+const Martyr = mongoose.models.Martyr || mongoose.model('Martyr', martyrSchema);
+const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
 
 // States
 const STATES = {
