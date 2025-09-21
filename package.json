@@ -8,7 +8,14 @@
     "build": "echo 'Build completed'",
     "start": "vercel --prod"
   },
-  "keywords": ["telegram", "bot", "nodejs", "mongodb", "vercel", "serverless"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "nodejs",
+    "mongodb",
+    "vercel",
+    "serverless"
+  ],
   "author": "DevYouns",
   "license": "MIT",
   "dependencies": {

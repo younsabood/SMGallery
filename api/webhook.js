@@ -43,7 +43,7 @@ const userSessionSchema = new mongoose.Schema({
     state: { type: String, default: 'idle' },
     data: { type: mongoose.Schema.Types.Mixed, default: {} },
     userInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
-    createdAt: { type: Date, default: Date.now, expires: 3600 },
+    createdAt: { type: Date, default: Date.now, expires: 3600 }, // Auto-delete after 1 hour
     updatedAt: { type: Date, default: Date.now }
 });
 
@@ -65,9 +65,9 @@ const requestSchema = new mongoose.Schema({
     userId: { type: String, required: true, index: true },
     martyrData: { type: mongoose.Schema.Types.Mixed, required: true },
     userInfo: { type: mongoose.Schema.Types.Mixed, required: true },
-    status: { 
-        type: String, 
-        enum: ['pending', 'approved', 'rejected'], 
+    status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
         default: 'pending',
         index: true
     },
@@ -75,10 +75,14 @@ const requestSchema = new mongoose.Schema({
     reviewedAt: { type: Date }
 });
 
-// Models with existence check for Vercel
-const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
-const Martyr = mongoose.models.Martyr || mongoose.model('Martyr', martyrSchema);
-const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
+// Add indexes for better performance
+userSessionSchema.index({ updatedAt: 1 });
+requestSchema.index({ status: 1, createdAt: -1 });
+
+// Models
+const UserSession = mongoose.model('UserSession', userSessionSchema);
+const Martyr = mongoose.model('Martyr', martyrSchema);
+const Request = mongoose.model('Request', requestSchema);
 
 // States
 const STATES = {
@@ -100,7 +104,7 @@ function generateRequestId() {
 
 async function sendTelegramMessage(chatId, options = {}) {
     const { text, replyMarkup, photoId, photoCaption } = options;
-    
+
     let url = TELEGRAM_API_URL;
     let payload = {
         chat_id: chatId,
@@ -117,17 +121,19 @@ async function sendTelegramMessage(chatId, options = {}) {
         url += "sendMessage";
         payload.text = text || "رسالة فارغة";
     }
-    
+
     if (replyMarkup) {
         payload.reply_markup = JSON.stringify(replyMarkup);
     }
-    
+
     try {
         const response = await axios.post(url, payload, {
-            timeout: 8000,
-            headers: { 'Content-Type': 'application/json' }
+            timeout: 10000, // 10 second timeout
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
-        console.log(`✅ Message sent to chat ${chatId}`);
+        console.log(`✅ Message sent successfully to chat ${chatId}`);
         return response.data;
     } catch (error) {
         console.error(`❌ Error sending message to chat ${chatId}:`, error.response?.data || error.message);
@@ -145,14 +151,14 @@ function getKeyboard(buttons) {
 
 function getInlineKeyboard(buttons) {
     return {
-        inline_keyboard: buttons.map(btn => [{ 
-            text: btn.text, 
-            callback_data: btn.callback_data 
+        inline_keyboard: buttons.map(btn => [{
+            text: btn.text,
+            callback_data: btn.callback_data
         }])
     };
 }
 
-// Database Functions
+// Database Functions with better error handling
 async function saveUserSession(userId, sessionData) {
     try {
         const result = await UserSession.findOneAndUpdate(
@@ -195,7 +201,7 @@ async function saveRequest(userId, requestData) {
             userId: userId.toString(),
             ...requestData
         });
-        
+
         await request.save();
         console.log(`✅ Request saved: ${requestId}`);
         return requestId;
@@ -207,7 +213,7 @@ async function saveRequest(userId, requestData) {
 
 async function updateRequestStatus(requestId, newStatus, userId) {
     const session = await mongoose.startSession();
-    
+
     try {
         await session.withTransaction(async () => {
             const request = await Request.findOne({ requestId }).session(session);
@@ -216,6 +222,7 @@ async function updateRequestStatus(requestId, newStatus, userId) {
             }
 
             if (newStatus === 'approved') {
+                // Save to martyrs collection
                 const martyrData = new Martyr({
                     nameFirst: request.martyrData.name_first,
                     nameFather: request.martyrData.name_father,
@@ -227,35 +234,37 @@ async function updateRequestStatus(requestId, newStatus, userId) {
                     place: request.martyrData.place,
                     imageUrl: request.martyrData.imageUrl
                 });
-                
+
                 await martyrData.save({ session });
-                
+
+                // Update request status
                 request.status = 'approved';
                 request.reviewedAt = new Date();
                 await request.save({ session });
-                
-                // Send notification to user (async)
+
+                // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
-                setImmediate(async () => {
+                setTimeout(async () => {
                     await sendTelegramMessage(userId.toString(), {
                         text: `<b>🎉 تهانينا!</b>\n\nتم قبول طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nشكراً لك على مساهمتك في حفظ ذكرى شهدائنا الأبرار.`
                     });
-                });
-                
+                }, 1000);
+
             } else if (newStatus === 'rejected') {
                 request.status = 'rejected';
                 request.reviewedAt = new Date();
                 await request.save({ session });
-                
+
+                // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
-                setImmediate(async () => {
+                setTimeout(async () => {
                     await sendTelegramMessage(userId.toString(), {
                         text: `<b>😔 عذراً،</b>\n\nتم رفض طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nيمكنك تقديم طلب جديد بعد مراجعة البيانات والتأكد من صحتها.\n\nللاستفسار تواصل مع: @DevYouns`
                     });
-                });
+                }, 1000);
             }
         });
-        
+
         return true;
     } catch (error) {
         console.error(`❌ Error updating request status:`, error);
@@ -295,7 +304,8 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
                 return;
             }
         }
-        
+
+        // Process user commands
         await processUserCommand(chatId, userId, text, userInfo);
     } catch (error) {
         console.error('❌ Error in handleTextMessage:', error);
@@ -318,28 +328,28 @@ async function processUserCommand(chatId, userId, text, userInfo) {
 • المساعدة
 
 لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
-        
+
         await sendTelegramMessage(chatId, {
             text: welcomeText,
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
         });
-        
+
     } else if (text === 'إضافة شهيد جديد' || text === '/upload') {
         await startUploadProcess(chatId, userId, userInfo);
-        
+
     } else if (text === 'مساعدة' || text === '/help') {
         await showHelp(chatId);
-        
+
     } else if (text === 'عرض طلباتي' || text === '/my_requests') {
         await showUserRequests(chatId, userId);
-        
+
     } else if (text === 'إلغاء' || text === '/cancel') {
         await clearUserSession(userId);
         await sendTelegramMessage(chatId, {
             text: "⌫ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام <b>إضافة شهيد جديد</b>",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
         });
-        
+
     } else {
         await handleUserInput(chatId, userId, text);
     }
@@ -352,7 +362,7 @@ async function startUploadProcess(chatId, userId, userInfo) {
         userInfo: userInfo,
         createdAt: new Date()
     };
-    
+
     if (await saveUserSession(userId, sessionData)) {
         await sendTelegramMessage(chatId, {
             text: "📝 لنبدأ بإضافة شهيد جديد\n\n1️⃣ الرجاء إدخال الاسم الأول:",
@@ -376,7 +386,7 @@ async function showHelp(chatId) {
 يمكنك مشاهدة حالة جميع طلباتك المقدمة
 
 📞 للمساعدة الإضافية، تواصل مع المدير: @DevYouns`;
-    
+
     await sendTelegramMessage(chatId, {
         text: helpText,
         replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
@@ -385,7 +395,7 @@ async function showHelp(chatId) {
 
 async function handleUserInput(chatId, userId, text) {
     const session = await getUserSession(userId);
-    
+
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
             text: "لا توجد عملية جارية. استخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
@@ -393,9 +403,9 @@ async function handleUserInput(chatId, userId, text) {
         });
         return;
     }
-    
+
     const currentState = session.state;
-    
+
     if (currentState === STATES.WAITING_FIRST_NAME) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال الاسم الأول" });
@@ -408,7 +418,7 @@ async function handleUserInput(chatId, userId, text) {
             text: "2️⃣ الرجاء إدخال اسم الأب:",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_FATHER_NAME) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال اسم الأب" });
@@ -421,7 +431,7 @@ async function handleUserInput(chatId, userId, text) {
             text: "3️⃣ الرجاء إدخال اسم العائلة:",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_FAMILY_NAME) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال اسم العائلة" });
@@ -434,14 +444,14 @@ async function handleUserInput(chatId, userId, text) {
             text: "4️⃣ الرجاء إدخال عمر الشهيد:",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_AGE) {
         const age = parseInt(text);
         if (isNaN(age) || age < 0 || age > 150) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال عمر صحيح (0-150)" });
             return;
         }
-        
+
         session.data.age = age;
         session.state = STATES.WAITING_BIRTH_DATE;
         await saveUserSession(userId, session);
@@ -449,7 +459,7 @@ async function handleUserInput(chatId, userId, text) {
             text: "5️⃣ الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_BIRTH_DATE) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال تاريخ الولادة" });
@@ -462,7 +472,7 @@ async function handleUserInput(chatId, userId, text) {
             text: "6️⃣ الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_MARTYRDOM_DATE) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال تاريخ الاستشهاد" });
@@ -475,7 +485,7 @@ async function handleUserInput(chatId, userId, text) {
             text: "7️⃣ الرجاء إدخال مكان الاستشهاد:",
             replyMarkup: getKeyboard(['إلغاء'])
         });
-        
+
     } else if (currentState === STATES.WAITING_PLACE) {
         if (!text.trim()) {
             await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال مكان الاستشهاد" });
@@ -493,7 +503,7 @@ async function handleUserInput(chatId, userId, text) {
 
 async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
     const session = await getUserSession(userId);
-    
+
     if (session.state !== STATES.WAITING_PHOTO) {
         await sendTelegramMessage(chatId, {
             text: "📸 يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
@@ -501,19 +511,19 @@ async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
         });
         return;
     }
-    
-    const photo = photoData[photoData.length - 1];
+
+    const photo = photoData[photoData.length - 1]; // أخذ أعلى دقة
     const photoFileId = photo.file_id;
     session.data.photo_file_id = photoFileId;
     session.data.photo_caption = caption;
-    
+
     await completeRequest(chatId, userId, session);
 }
 
 async function completeRequest(chatId, userId, session) {
     const martyrData = session.data;
     const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
-    
+
     const requestData = {
         martyrData: {
             name_first: martyrData.first_name || '',
@@ -529,12 +539,12 @@ async function completeRequest(chatId, userId, session) {
         userInfo: session.userInfo,
         status: 'pending'
     };
-    
+
     const requestId = await saveRequest(userId, requestData);
-    
+
     if (requestId) {
         await clearUserSession(userId);
-        
+
         const messageSummary = `✅ تم إرسال طلبك بنجاح!
 
 📋 ملخص البيانات:
@@ -546,7 +556,7 @@ async function completeRequest(chatId, userId, session) {
 
 ⏳ سيتم مراجعة طلبك من قبل الإدارة
 📱 يمكنك متابعة حالة طلبك باستخدام <b>عرض طلباتي</b>`;
-        
+
         const photoFileId = martyrData.photo_file_id;
         if (photoFileId) {
             await sendTelegramMessage(chatId, {
@@ -560,12 +570,10 @@ async function completeRequest(chatId, userId, session) {
                 replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
             });
         }
-        
-        // Send notification to admin (async)
+
+        // Send notification to admin
         const adminNotificationText = `<b>⭐️ طلب جديد للمراجعة ⭐️</b>\n\n<b>ID الطلب:</b> <code>${requestId}</code>\n<b>ID المستخدم:</b> <code>${userId}</code>\n<b>الاسم:</b> ${fullName}\n\n<b>مقدم الطلب:</b> ${session.userInfo.first_name || ''} ${session.userInfo.last_name || ''} (@${session.userInfo.username || ''})\n\nيمكنك مراجعة الطلب باستخدام /review`;
-        setImmediate(async () => {
-            await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
-        });
+        await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
 
     } else {
         await sendTelegramMessage(chatId, {
@@ -580,7 +588,7 @@ async function showUserRequests(chatId, userId) {
         const requests = await Request.find({ userId: userId.toString() })
             .sort({ createdAt: -1 })
             .limit(10);
-        
+
         if (!requests.length) {
             await sendTelegramMessage(chatId, {
                 text: "🔭 لا توجد طلبات مقدمة من قبلك حتى الآن",
@@ -588,36 +596,36 @@ async function showUserRequests(chatId, userId) {
             });
             return;
         }
-        
+
         let requestsText = "<b>📋 طلباتك المقدمة:</b>\n\n";
-        
+
         for (const req of requests) {
             const martyrName = req.martyrData.full_name || 'غير محدد';
             const status = req.status;
             const createdAt = req.createdAt.toISOString().substring(0, 10);
-            
+
             const statusEmoji = {
                 'pending': '⏳',
-                'approved': '✅', 
+                'approved': '✅',
                 'rejected': '❌'
             }[status] || '❓';
-            
+
             const statusText = {
                 'pending': 'قيد المراجعة',
                 'approved': 'تم القبول',
                 'rejected': 'تم الرفض'
             }[status] || 'غير معروف';
-            
+
             requestsText += `${statusEmoji} <b>${martyrName}</b>\n`;
             requestsText += `   الحالة: ${statusText}\n`;
             requestsText += `   التاريخ: ${createdAt}\n\n`;
         }
-        
+
         await sendTelegramMessage(chatId, {
             text: requestsText,
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'مساعدة'])
         });
-        
+
     } catch (error) {
         console.error('❌ Error showing user requests:', error);
         await sendTelegramMessage(chatId, {
@@ -627,7 +635,6 @@ async function showUserRequests(chatId, userId) {
     }
 }
 
-// Admin Functions
 async function reviewPendingRequests(chatId) {
     try {
         const requests = await Request.find({ status: 'pending' })
@@ -652,7 +659,7 @@ async function reviewPendingRequests(chatId) {
             if (martyrData.imageUrl && martyrData.imageUrl.includes('photos')) {
                 photoFileId = martyrData.imageUrl.split('/').pop();
             }
-            
+
             const inlineKeyboard = getInlineKeyboard([
                 { text: '✅ قبول', callback_data: `approve_${request.requestId}_${userId}` },
                 { text: '❌ رفض', callback_data: `reject_${request.requestId}_${userId}` }
@@ -726,11 +733,11 @@ async function handleCallbackQuery(chatId, callbackData) {
             });
             return;
         }
-        
+
         const action = parts[0];
         const requestId = parts[1];
         const userIdOfRequest = parts[2];
-        
+
         if (action === 'approve') {
             await approveRequest(chatId, requestId, userIdOfRequest);
         } else if (action === 'reject') {
@@ -748,63 +755,29 @@ async function handleCallbackQuery(chatId, callbackData) {
     }
 }
 
-// Main Vercel Handler
-export default async function handler(req, res) {
-    // Set CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    // Handle OPTIONS request for CORS
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    // Handle GET request (health check)
-    if (req.method === 'GET') {
-        try {
-            await connectToDatabase();
-            const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-            
-            return res.status(200).json({
-                status: 'ok',
-                message: 'Syrian Martyrs Bot is running! 🌹',
-                timestamp: new Date().toISOString(),
-                mongodb_status: dbStatus,
-                admin_id: ADMIN_USER_ID || 'not set',
-                version: '1.0.0-vercel',
-                platform: 'Vercel Serverless'
-            });
-        } catch (error) {
-            return res.status(500).json({
-                status: 'error',
-                message: error.message,
-                timestamp: new Date().toISOString()
-            });
-        }
-    }
-
-    // Handle POST request (Telegram webhook)
+// Main handler
+module.exports = async (req, res) => {
+    // Check if the request method is POST
     if (req.method === 'POST') {
         try {
-            // Connect to database
-            await connectToDatabase();
-
             const update = req.body;
-            console.log('📨 Webhook received:', update?.message?.message_id || 'callback_query');
-            
+            console.log('📨 Received update from Telegram');
+
             if (update.message) {
                 const message = update.message;
                 const chatId = message.chat.id;
                 const userId = message.from.id.toString();
-                
+
                 const userInfo = {
                     telegram_id: userId,
                     first_name: message.from.first_name || '',
                     last_name: message.from.last_name || '',
                     username: message.from.username || ''
                 };
-                
+
+                // Connect to database
+                await connectToDatabase();
+
                 if (message.text) {
                     await handleTextMessage(chatId, userId, message.text, userInfo);
                 } else if (message.photo) {
@@ -815,57 +788,49 @@ export default async function handler(req, res) {
                         text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
                     });
                 }
-
             } else if (update.callback_query) {
                 const callbackQuery = update.callback_query;
-                const callbackData = callbackQuery.data;
                 const chatId = callbackQuery.message.chat.id;
-                const userId = callbackQuery.from.id.toString();
-
-                // Check if user is admin
-                if (userId === ADMIN_USER_ID) {
-                    await handleCallbackQuery(chatId, callbackData);
-                    
-                    // Answer callback query
-                    try {
-                        await axios.post(`${TELEGRAM_API_URL}answerCallbackQuery`, {
-                            callback_query_id: callbackQuery.id
-                        });
-                    } catch (error) {
-                        console.error('❌ Error answering callback query:', error);
-                    }
-                } else {
-                    // Answer callback query with error message
-                    try {
-                        await axios.post(`${TELEGRAM_API_URL}answerCallbackQuery`, {
-                            callback_query_id: callbackQuery.id,
-                            text: 'غير مسموح لك بهذا العمل',
-                            show_alert: true
-                        });
-                    } catch (error) {
-                        console.error('❌ Error answering callback query:', error);
-                    }
-                }
+                await handleCallbackQuery(chatId, callbackQuery.data);
             }
-            
+
             // Always respond with 200 OK to Telegram
             return res.status(200).json({ status: 'ok' });
-            
+
         } catch (error) {
             console.error('❌ Error processing webhook:', error);
-            
+
             // Still return 200 to avoid Telegram retries
-            return res.status(200).json({ 
-                status: 'error', 
+            return res.status(200).json({
+                status: 'error',
                 message: 'Internal error occurred',
                 error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
             });
         }
     }
 
+    // Handle other requests (e.g., GET)
+    if (req.method === 'GET' || req.method === 'OPTIONS') {
+        try {
+            await connectToDatabase();
+            return res.status(200).json({
+                "status": "ok",
+                "message": "Syrian Martyrs Bot is running! 🌹",
+                "mongodb_status": "connected",
+                "platform": "Vercel Serverless"
+            });
+        } catch (error) {
+            return res.status(500).json({
+                "status": "error",
+                "message": "Bot is not connected to MongoDB.",
+                "error": error.message
+            });
+        }
+    }
+
     // Method not allowed
-    return res.status(405).json({ 
-        status: 'error', 
-        message: 'Method not allowed' 
+    return res.status(405).json({
+        status: 'error',
+        message: 'Method not allowed'
     });
-}
+};
