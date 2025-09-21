@@ -137,12 +137,13 @@ async function uploadPhotoToImgbb(fileId, env) {
 async function saveUserSession(userId, sessionData, env) {
     try {
         await env.DB.prepare(
-            'INSERT OR REPLACE INTO sessions (user_id, state, data, user_info, created_at) VALUES (?, ?, ?, ?, ?)'
+            'INSERT OR REPLACE INTO sessions (user_id, state, data, user_info, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
         ).bind(
             userId,
             sessionData.state,
             JSON.stringify(sessionData.data),
             JSON.stringify(sessionData.userInfo),
+            new Date().toISOString(),
             new Date().toISOString()
         ).run();
         console.log(`Session saved for user ${userId} using D1.`);
