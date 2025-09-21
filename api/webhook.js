@@ -6,8 +6,10 @@ const axios = require('axios');
 // Using direct strings for troubleshooting.
 // REMEMBER to replace with process.env.YOUR_VARIABLE for production!
 const BOT_TOKEN = '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
-const ADMIN_USER_ID = 'YOUR_ADMIN_USER_ID'; // Replace with your actual user ID
+// Replace with your actual user ID
+const ADMIN_USER_ID = '5679396406';
 const MONGODB_URI = 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
+const IMGBB_API_KEY = '7b98d38c418169cf635290b4a31f8e95'; // New: Your imgbb API Key
 
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
@@ -50,19 +52,6 @@ const userSessionSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
-const martyrSchema = new mongoose.Schema({
-    nameFirst: { type: String, required: true, trim: true },
-    nameFather: { type: String, required: true, trim: true },
-    nameFamily: { type: String, required: true, trim: true },
-    fullName: { type: String, required: true, index: true },
-    age: { type: Number, min: 0, max: 150 },
-    dateBirth: { type: String, trim: true },
-    dateMartyrdom: { type: String, trim: true },
-    place: { type: String, trim: true },
-    imageUrl: { type: String, trim: true },
-    createdAt: { type: Date, default: Date.now, index: true }
-});
-
 const requestSchema = new mongoose.Schema({
     requestId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true },
@@ -78,9 +67,16 @@ const requestSchema = new mongoose.Schema({
     reviewedAt: { type: Date }
 });
 
-// Add indexes for better performance
-userSessionSchema.index({ updatedAt: 1 });
+// Add TTL index to automatically delete pending requests after 30 days
+// 30 days = 30 * 24 * 60 * 60 = 2592000 seconds
+requestSchema.index(
+    { "createdAt": 1 }, 
+    { expireAfterSeconds: 2592000, partialFilterExpression: { status: 'pending' } }
+);
+// Add regular index for better performance
 requestSchema.index({ status: 1, createdAt: -1 });
+userSessionSchema.index({ updatedAt: 1 });
+
 
 // Models
 const UserSession = mongoose.model('UserSession', userSessionSchema);
@@ -141,6 +137,45 @@ async function sendTelegramMessage(chatId, options = {}) {
         return response.data;
     } catch (error) {
         console.error(`❌ Error sending message to chat ${chatId}:`, error.response?.data || error.message);
+        return null;
+    }
+}
+
+async function getTelegramPhotoUrl(fileId) {
+    try {
+        const response = await axios.get(`${TELEGRAM_API_URL}getFile?file_id=${fileId}`);
+        const filePath = response.data.result.file_path;
+        return `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+    } catch (error) {
+        console.error('❌ Error getting Telegram file path:', error.response?.data || error.message);
+        return null;
+    }
+}
+
+async function uploadPhotoToImgbb(fileId) {
+    try {
+        const fileUrl = await getTelegramPhotoUrl(fileId);
+        if (!fileUrl) {
+            console.error('❌ Could not get Telegram file URL.');
+            return null;
+        }
+
+        const response = await axios.post('https://api.imgbb.com/1/upload', null, {
+            params: {
+                key: IMGBB_API_KEY,
+                image: fileUrl
+            }
+        });
+
+        if (response.data.success) {
+            console.log('✅ Photo uploaded to imgbb successfully.');
+            return response.data.data.url;
+        } else {
+            console.error('❌ imgbb upload failed:', response.data.error.message);
+            return null;
+        }
+    } catch (error) {
+        console.error('❌ Error uploading photo to imgbb:', error.response?.data || error.message);
         return null;
     }
 }
@@ -260,10 +295,9 @@ async function updateRequestStatus(requestId, newStatus, userId) {
                 }, 1000);
 
             } else if (newStatus === 'rejected') {
-                request.status = 'rejected';
-                request.reviewedAt = new Date();
-                await request.save({ session });
-                console.log(`✅ Request ID: ${requestId} status updated to rejected.`);
+                // Now delete the rejected request
+                await Request.deleteOne({ requestId }).session(session);
+                console.log(`✅ Rejected Request ID: ${requestId} has been deleted.`);
 
                 // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
@@ -289,8 +323,11 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
     try {
         console.log(`Handling text message from user ${userId}: "${text}"`);
 
+        // Check if the user is an admin first
+        const isAdmin = userId.toString() === ADMIN_USER_ID;
+
         // Admin commands
-        if (userId.toString() === ADMIN_USER_ID) {
+        if (isAdmin) {
             if (text === '/review') {
                 await reviewPendingRequests(chatId);
                 return;
@@ -541,6 +578,19 @@ async function completeRequest(chatId, userId, session) {
     const martyrData = session.data;
     const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
 
+    let imgbbUrl = null;
+    if (martyrData.photo_file_id) {
+        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id);
+    }
+    
+    if (!imgbbUrl) {
+         await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى.",
+            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+        });
+        return;
+    }
+
     const requestData = {
         martyrData: {
             name_first: martyrData.first_name || '',
@@ -551,7 +601,7 @@ async function completeRequest(chatId, userId, session) {
             date_birth: martyrData.birth_date || '',
             date_martyrdom: martyrData.martyrdom_date || '',
             place: martyrData.place || '',
-            imageUrl: `https://api.telegram.org/file/bot${BOT_TOKEN}/photos/${martyrData.photo_file_id || ''}`,
+            imageUrl: imgbbUrl, // New: Use imgbb URL
         },
         userInfo: session.userInfo,
         status: 'pending'
