@@ -4,7 +4,7 @@ const axios = require('axios');
 
 // Configuration
 const BOT_TOKEN = process.env.ADMIN_BOT_TOKEN || '8228757774:AAEtnKk-H_Vwpphz4rziw-6pW_US_mKw4ds'; // Use a new token for this bot
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID || '5679396406'; // Your Telegram User ID
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Youns@#$123'; // Define an admin password here
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
@@ -37,7 +37,7 @@ async function connectToDatabase() {
     }
 }
 
-// Schemas (assuming they are already defined in the main bot)
+// Schemas
 const requestSchema = new mongoose.Schema({
     requestId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true },
@@ -67,8 +67,13 @@ const martyrSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
+const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', new mongoose.Schema({
+    userId: { type: String, required: true, unique: true },
+    isAdmin: { type: Boolean, default: false }
+}, { timestamps: true }));
 const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
 const Martyr = mongoose.models.Martyr || mongoose.model('Martyr', martyrSchema);
+
 
 // Utility Functions (simplified for admin bot)
 function getKeyboard(buttons) {
@@ -253,39 +258,66 @@ module.exports = async (req, res) => {
         try {
             const update = req.body;
             await connectToDatabase();
-
+            
             const isCallbackQuery = update.callback_query;
-            const chatId = isCallbackQuery ? update.callback_query.message.chat.id : update.message.chat.id;
-            const userId = isCallbackQuery ? update.callback_query.from.id.toString() : update.message.from.id.toString();
+            const message = update.message;
+            
+            const chatId = isCallbackQuery ? update.callback_query.message.chat.id : message.chat.id;
+            const userId = isCallbackQuery ? update.callback_query.from.id.toString() : message.from.id.toString();
+            const text = message ? message.text : '';
+            const session = await UserSession.findOne({ userId });
 
-            if (userId !== ADMIN_USER_ID) {
-                await sendTelegramMessage(chatId, { text: "عذراً، هذا البوت مخصص للمسؤولين فقط." });
-                return res.status(200).json({ status: 'unauthorized' });
-            }
-
-            if (isCallbackQuery) {
-                await handleCallbackQuery(chatId, update.callback_query.data);
-            } else if (update.message.text) {
-                const text = update.message.text;
-                if (text === '/start') {
-                    const welcomeText = `مرحباً بك في لوحة الإدارة
+            if (session && session.isAdmin) {
+                // User is already logged in as admin
+                if (isCallbackQuery) {
+                    await handleCallbackQuery(chatId, update.callback_query.data);
+                } else if (text) {
+                    if (text === '/start') {
+                        const welcomeText = `مرحباً بك في لوحة الإدارة
 بوت معرض شهداء الساحل السوري
 الأوامر المتاحة:
 • مراجعة الطلبات المعلقة
 • عرض إحصائيات النظام`;
-                    await sendTelegramMessage(chatId, {
-                        text: welcomeText,
-                        replyMarkup: getKeyboard(['مراجعة الطلبات المعلقة', 'عرض إحصائيات النظام'])
-                    });
-                } else if (text === 'مراجعة الطلبات المعلقة' || text === '/review') {
-                    await reviewPendingRequests(chatId);
-                } else if (text === 'عرض إحصائيات النظام' || text === '/stats') {
-                    await showSystemStats(chatId);
+                        await sendTelegramMessage(chatId, {
+                            text: welcomeText,
+                            replyMarkup: getKeyboard(['مراجعة الطلبات المعلقة', 'عرض إحصائيات النظام'])
+                        });
+                    } else if (text === 'مراجعة الطلبات المعلقة' || text === '/review') {
+                        await reviewPendingRequests(chatId);
+                    } else if (text === 'عرض إحصائيات النظام' || text === '/stats') {
+                        await showSystemStats(chatId);
+                    } else if (text === '/logout') {
+                        await UserSession.deleteOne({ userId });
+                        await sendTelegramMessage(chatId, {
+                            text: "تم تسجيل الخروج. لإعادة الدخول، استخدم الأمر /login"
+                        });
+                    } else {
+                        await sendTelegramMessage(chatId, { text: "أمر غير مدعوم." });
+                    }
                 } else {
-                    await sendTelegramMessage(chatId, { text: "أمر غير مدعوم." });
+                    await sendTelegramMessage(chatId, { text: "نوع الرسالة غير مدعوم." });
                 }
             } else {
-                await sendTelegramMessage(chatId, { text: "نوع الرسالة غير مدعوم." });
+                // User is not logged in
+                if (text && text.startsWith('/login ')) {
+                    const password = text.split(' ')[1];
+                    if (password === ADMIN_PASSWORD) {
+                        await UserSession.findOneAndUpdate({ userId }, { isAdmin: true }, { upsert: true });
+                        const welcomeText = `تم تسجيل الدخول بنجاح!
+مرحباً بك في لوحة الإدارة
+الأوامر المتاحة:
+• مراجعة الطلبات المعلقة
+• عرض إحصائيات النظام`;
+                        await sendTelegramMessage(chatId, {
+                            text: welcomeText,
+                            replyMarkup: getKeyboard(['مراجعة الطلبات المعلقة', 'عرض إحصائيات النظام'])
+                        });
+                    } else {
+                        await sendTelegramMessage(chatId, { text: "كلمة السر غير صحيحة." });
+                    }
+                } else {
+                    await sendTelegramMessage(chatId, { text: "عذراً، هذا البوت مخصص للمسؤولين فقط.\nيرجى استخدام الأمر /login <كلمة_السر> للدخول." });
+                }
             }
 
             return res.status(200).json({ status: 'ok' });
