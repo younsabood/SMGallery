@@ -188,20 +188,6 @@ async function clearUserSession(userId, env) {
 // Request Management with D1
 async function saveRequest(userId, requestData, env) {
     try {
-        // Check if user exists, if not, create a new user entry
-        const user = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
-        if (!user) {
-             await env.DB.prepare(
-                'INSERT INTO users (id, first_name, last_name, username, created_at) VALUES (?, ?, ?, ?, ?)'
-            ).bind(
-                userId,
-                requestData.userInfo.first_name,
-                requestData.userInfo.last_name,
-                requestData.userInfo.username,
-                new Date().toISOString()
-            ).run();
-        }
-
         const result = await env.DB.prepare(
             `INSERT INTO submission_requests (id, user_id, full_name, name_first, name_father, name_family, age, date_birth, date_martyrdom, place, image_url, status, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
