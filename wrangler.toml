@@ -1,5 +1,5 @@
 name = "data-user-bot"
-main = "index.js"
+main = "src/index.js"
 compatibility_date = "2024-09-21"
 
 [vars]
