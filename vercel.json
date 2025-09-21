@@ -25,8 +25,5 @@
     "ADMIN_USER_ID": "ADMIN_USER_ID",
     "MONGODB_URI": "MONGODB_URI",
     "NODE_ENV": "production"
-  },
-  "build": {
-    "outputDirectory": ""
   }
 }
