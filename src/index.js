@@ -718,6 +718,137 @@ async function completeRequest(chatId, userId, session, env) {
     }
 }
 
+async function completeRequest(chatId, userId, session, env) {
+    console.log(`Completing request for user ${userId}.`);
+    const martyrData = session.data;
+    const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
+
+    let imgbbUrl = null;
+    if (martyrData.photo_file_id) {
+        await sendTelegramMessage(chatId, {
+            text: "جاري تحميل الصورة، يرجى الانتظار...",
+        }, env);
+        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
+    }
+    
+    if (!imgbbUrl) {
+         await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى.",
+            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+        }, env);
+        return;
+    }
+
+    const requestData = {
+        martyrData: {
+            name_first: martyrData.first_name || '',
+            name_father: martyrData.father_name || '',
+            name_family: martyrData.family_name || '',
+            full_name: fullName,
+            age: martyrData.age || null,
+            date_birth: martyrData.birth_date || '',
+            date_martyrdom: martyrData.martyrdom_date || '',
+            place: martyrData.place || '',
+            imageUrl: imgbbUrl,
+        },
+        userInfo: session.userInfo
+    };
+
+    const requestId = await saveRequest(userId, requestData, env);
+
+    if (requestId) {
+        await clearUserSession(userId, env);
+
+        const messageSummary = `تم إرسال طلبك بنجاح!
+
+<b>ملخص البيانات:</b>
+الاسم: ${fullName}
+العمر: ${martyrData.age || 'غير متوفر'}
+الولادة: ${martyrData.birth_date || 'غير متوفر'}
+الاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}
+المكان: ${martyrData.place || 'غير متوفر'}
+
+سيتم مراجعة طلبك من قبل الإدارة
+يمكنك متابعة حالة طلبك باستخدام <b>عرض طلباتي</b>`;
+
+        const photoFileId = martyrData.photo_file_id;
+        if (photoFileId) {
+            await sendTelegramMessage(chatId, {
+                photoCaption: messageSummary,
+                photoId: photoFileId,
+                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
+            }, env);
+        } else {
+            await sendTelegramMessage(chatId, {
+                text: messageSummary,
+                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
+            }, env);
+        }
+    } else {
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
+            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+        }, env);
+    }
+}
+
 // Main handler
 async function handleRequest(request, env) {
-    if (request.method === 'POST
+    if (request.method === 'POST') {
+        try {
+            const update = await request.json();
+            console.log('Received update from Telegram');
+
+            if (update.message) {
+                const message = update.message;
+                const chatId = message.chat.id;
+                const userId = message.from.id.toString();
+
+                const userInfo = {
+                    telegram_id: userId,
+                    first_name: message.from.first_name || '',
+                    last_name: message.from.last_name || '',
+                    username: message.from.username || ''
+                };
+
+                if (message.text) {
+                    await handleTextMessage(chatId, userId, message.text, userInfo, env);
+                } else if (message.photo) {
+                    const caption = message.caption || '';
+                    await handlePhotoMessage(chatId, userId, message.photo, caption, env);
+                } else {
+                    await sendTelegramMessage(chatId, {
+                        text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
+                    }, env);
+                }
+            } else {
+                console.log('Received unsupported update type.');
+            }
+
+            return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+
+        } catch (error) {
+            console.error('Error processing webhook:', error);
+            return new Response(JSON.stringify({
+                status: 'error',
+                message: 'Internal error occurred',
+                error: error.message
+            }), { status: 500 });
+        }
+    } else if (request.method === 'GET') {
+        return new Response(JSON.stringify({
+            "status": "ok",
+            "message": "Syrian Martyrs Bot is running on Cloudflare Workers!",
+            "platform": "Cloudflare Workers"
+        }), { status: 200 });
+    }
+
+    return new Response(JSON.stringify({ status: 'error', message: 'Method Not Allowed' }), { status: 405 });
+}
+
+// Export the handler for Cloudflare Workers
+export default {
+    async fetch(request, env, ctx) {
+        return handleRequest(request, env);
+    },
+};
