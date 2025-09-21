@@ -52,6 +52,21 @@ const userSessionSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
+// Missing martyrSchema definition - this was causing the error
+const martyrSchema = new mongoose.Schema({
+    nameFirst: { type: String, required: true },
+    nameFather: { type: String, required: true },
+    nameFamily: { type: String, required: true },
+    fullName: { type: String, required: true, index: true },
+    age: { type: Number },
+    dateBirth: { type: String },
+    dateMartyrdom: { type: String, required: true },
+    place: { type: String, required: true },
+    imageUrl: { type: String },
+    createdAt: { type: Date, default: Date.now, index: true },
+    updatedAt: { type: Date, default: Date.now }
+});
+
 const requestSchema = new mongoose.Schema({
     requestId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true },
@@ -76,7 +91,6 @@ const requestSchema = new mongoose.Schema({
 // Add regular index for better performance
 requestSchema.index({ status: 1, createdAt: -1 });
 userSessionSchema.index({ updatedAt: 1 });
-
 
 // Models
 const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
@@ -396,7 +410,7 @@ async function processUserCommand(chatId, userId, text, userInfo) {
     } else if (text === 'إلغاء' || text === '/cancel') {
         await clearUserSession(userId);
         await sendTelegramMessage(chatId, {
-            text: "⌫ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام <b>إضافة شهيد جديد</b>",
+            text: "❌ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام <b>إضافة شهيد جديد</b>",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
         });
 
@@ -460,7 +474,7 @@ async function handleUserInput(chatId, userId, text) {
 
     if (currentState === STATES.WAITING_FIRST_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال الاسم الأول" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال الاسم الأول" });
             return;
         }
         session.data.first_name = text.trim();
@@ -473,7 +487,7 @@ async function handleUserInput(chatId, userId, text) {
 
     } else if (currentState === STATES.WAITING_FATHER_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال اسم الأب" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال اسم الأب" });
             return;
         }
         session.data.father_name = text.trim();
@@ -486,7 +500,7 @@ async function handleUserInput(chatId, userId, text) {
 
     } else if (currentState === STATES.WAITING_FAMILY_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال اسم العائلة" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال اسم العائلة" });
             return;
         }
         session.data.family_name = text.trim();
@@ -500,7 +514,7 @@ async function handleUserInput(chatId, userId, text) {
     } else if (currentState === STATES.WAITING_AGE) {
         const age = parseInt(text);
         if (isNaN(age) || age < 0 || age > 150) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال عمر صحيح (0-150)" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال عمر صحيح (0-150)" });
             return;
         }
 
@@ -514,7 +528,7 @@ async function handleUserInput(chatId, userId, text) {
 
     } else if (currentState === STATES.WAITING_BIRTH_DATE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال تاريخ الولادة" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال تاريخ الولادة" });
             return;
         }
         session.data.birth_date = text.trim();
@@ -527,7 +541,7 @@ async function handleUserInput(chatId, userId, text) {
 
     } else if (currentState === STATES.WAITING_MARTYRDOM_DATE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال تاريخ الاستشهاد" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال تاريخ الاستشهاد" });
             return;
         }
         session.data.martyrdom_date = text.trim();
@@ -540,7 +554,7 @@ async function handleUserInput(chatId, userId, text) {
 
     } else if (currentState === STATES.WAITING_PLACE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "⌫ الرجاء إدخال مكان الاستشهاد" });
+            await sendTelegramMessage(chatId, { text: "❌ الرجاء إدخال مكان الاستشهاد" });
             return;
         }
         session.data.place = text.trim();
@@ -639,7 +653,7 @@ async function completeRequest(chatId, userId, session) {
         }
 
         // Send notification to admin
-        const adminNotificationText = `<b>⭐️ طلب جديد للمراجعة ⭐️</b>\n\n<b>ID الطلب:</b> <code>${requestId}</code>\n<b>ID المستخدم:</b> <code>${userId}</code>\n<b>الاسم:</b> ${fullName}\n\n<b>مقدم الطلب:</b> ${session.userInfo.first_name || ''} ${session.userInfo.last_name || ''} (@${session.userInfo.username || ''})\n\nيمكنك مراجعة الطلب باستخدام /review`;
+        const adminNotificationText = `<b>⭐ طلب جديد للمراجعة ⭐</b>\n\n<b>ID الطلب:</b> <code>${requestId}</code>\n<b>ID المستخدم:</b> <code>${userId}</code>\n<b>الاسم:</b> ${fullName}\n\n<b>مقدم الطلب:</b> ${session.userInfo.first_name || ''} ${session.userInfo.last_name || ''} (@${session.userInfo.username || ''})\n\nيمكنك مراجعة الطلب باستخدام /review`;
         await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
 
     } else {
