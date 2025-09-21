@@ -580,62 +580,82 @@ async function completeRequest(chatId, userId, session) {
 
 // Main handler
 exports.handler = async (event, context) => {
-    // Get headers from the event object
-    const headers = event.headers;
-
     // Check for POST method
-    if (event.httpMethod !== 'POST') {
-        return {
-            statusCode: 405,
-            body: JSON.stringify({ status: 'error', message: 'Method Not Allowed' }),
-        };
-    }
+    if (event.httpMethod === 'POST') {
+        try {
+            const update = JSON.parse(event.body);
+            console.log('Received update from Telegram');
 
-    try {
-        const update = JSON.parse(event.body);
-        console.log('Received update from Telegram');
+            if (update.message) {
+                const message = update.message;
+                const chatId = message.chat.id;
+                const userId = message.from.id.toString();
 
-        if (update.message) {
-            const message = update.message;
-            const chatId = message.chat.id;
-            const userId = message.from.id.toString();
+                const userInfo = {
+                    telegram_id: userId,
+                    first_name: message.from.first_name || '',
+                    last_name: message.from.last_name || '',
+                    username: message.from.username || ''
+                };
 
-            const userInfo = {
-                telegram_id: userId,
-                first_name: message.from.first_name || '',
-                last_name: message.from.last_name || '',
-                username: message.from.username || ''
-            };
+                await connectToDatabase();
 
-            await connectToDatabase();
-
-            if (message.text) {
-                await handleTextMessage(chatId, userId, message.text, userInfo);
-            } else if (message.photo) {
-                const caption = message.caption || '';
-                await handlePhotoMessage(chatId, userId, message.photo, caption);
+                if (message.text) {
+                    await handleTextMessage(chatId, userId, message.text, userInfo);
+                } else if (message.photo) {
+                    const caption = message.caption || '';
+                    await handlePhotoMessage(chatId, userId, message.photo, caption);
+                } else {
+                    await sendTelegramMessage(chatId, {
+                        text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
+                    });
+                }
             } else {
-                await sendTelegramMessage(chatId, {
-                    text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
-                });
+                console.log('Received unsupported update type.');
             }
-        } else {
-            console.log('Received unsupported update type.');
-        }
 
-        return {
-            statusCode: 200,
-            body: JSON.stringify({ status: 'ok' }),
-        };
-    } catch (error) {
-        console.error('Error processing webhook:', error);
-        return {
-            statusCode: 200,
-            body: JSON.stringify({
-                status: 'error',
-                message: 'Internal error occurred',
-                error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
-            }),
-        };
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ status: 'ok' }),
+            };
+        } catch (error) {
+            console.error('Error processing webhook:', error);
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    status: 'error',
+                    message: 'Internal error occurred',
+                    error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
+                }),
+            };
+        }
+    } else if (event.httpMethod === 'GET') {
+        // Handle GET requests for a basic health check
+        try {
+            await connectToDatabase();
+            return {
+                statusCode: 200,
+                body: JSON.stringify({
+                    "status": "ok",
+                    "message": "Syrian Martyrs Bot is running!",
+                    "mongodb_status": "connected",
+                    "platform": "Netlify Serverless"
+                }),
+            };
+        } catch (error) {
+            return {
+                statusCode: 500,
+                body: JSON.stringify({
+                    "status": "error",
+                    "message": "Bot is not connected to MongoDB.",
+                    "error": error.message
+                }),
+            };
+        }
     }
+
+    return {
+        statusCode: 405,
+        body: JSON.stringify({ status: 'error', message: 'Method Not Allowed' }),
+    };
 };
