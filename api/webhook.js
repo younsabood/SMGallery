@@ -26,8 +26,8 @@ async function connectToDatabase() {
             maxPoolSize: 5, // Limit pool size for serverless
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
-            bufferMaxEntries: 0,
-            bufferCommands: false,
+            // Removed: bufferMaxEntries: 0,
+            // Removed: bufferCommands: false,
         });
 
         cachedConnection = connection;
