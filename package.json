@@ -1,11 +1,11 @@
 {
-  "name": "data-user-bot",
-  "version": "1.0.0",
-  "description": "A Telegram bot for the Syrian Martyrs database.",
-  "main": "src/index.js",
-  "scripts": {
-    "deploy": "npx wrangler deploy --env user"
-  },
-  "author": "",
-  "license": "MIT"
+"name": "syrian-martyrs-bot",
+"version": "1.0.0",
+"description": "A Telegram bot for the Syrian Martyrs database.",
+"main": "src/index.js",
+"scripts": {
+"deploy": "npx wrangler deploy --env user"
+},
+"author": "",
+"license": "MIT"
 }

@@ -106,9 +106,13 @@ async function uploadPhotoToImgbb(fileId, env) {
             return null;
         }
 
+        // Fetch the image data directly
+        const imageResponse = await fetch(fileUrl);
+        const imageBlob = await imageResponse.blob();
+
         const formData = new FormData();
         formData.append('key', IMGBB_API_KEY);
-        formData.append('image', fileUrl);
+        formData.append('image', imageBlob);
 
         const response = await fetch('https://api.imgbb.com/1/upload', {
             method: 'POST',
@@ -133,7 +137,7 @@ async function uploadPhotoToImgbb(fileId, env) {
 async function saveUserSession(userId, sessionData, env) {
     try {
         await env.DB.prepare(
-            'INSERT OR REPLACE INTO sessions (user_id, state, data, userInfo, created_at) VALUES (?, ?, ?, ?, ?)'
+            'INSERT OR REPLACE INTO sessions (user_id, state, data, user_info, created_at) VALUES (?, ?, ?, ?, ?)'
         ).bind(
             userId,
             sessionData.state,
@@ -154,10 +158,11 @@ async function getUserSession(userId, env) {
         const session = await env.DB.prepare('SELECT * FROM sessions WHERE user_id = ?').bind(userId).first();
         if (session) {
             console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
+            // Fix: Check if data and user_info are null before parsing
             return {
                 state: session.state,
-                data: JSON.parse(session.data),
-                userInfo: JSON.parse(session.userInfo),
+                data: session.data ? JSON.parse(session.data) : {},
+                userInfo: session.user_info ? JSON.parse(session.user_info) : {},
                 createdAt: session.created_at
             };
         }
@@ -165,7 +170,7 @@ async function getUserSession(userId, env) {
         console.error(`Error retrieving session for user ${userId}:`, error.message);
     }
     console.log(`No session found for user ${userId}.`);
-    return { state: STATES.IDLE, data: {} };
+    return { state: STATES.IDLE, data: {}, userInfo: {} };
 }
 
 async function clearUserSession(userId, env) {
@@ -332,7 +337,6 @@ async function startUploadProcess(chatId, userId, userInfo, env) {
         state: STATES.WAITING_FIRST_NAME,
         data: {},
         userInfo: userInfo,
-        createdAt: new Date().toISOString()
     };
 
     const isSessionSaved = await saveUserSession(userId, sessionData, env);
