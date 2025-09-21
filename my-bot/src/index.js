@@ -27,9 +27,9 @@ function getKeyboard(buttons) {
 }
 
 // Telegram API interactions
-async function sendTelegramMessage(chatId, options = {}) {
+async function sendTelegramMessage(chatId, options = {}, env) {
     const { text, replyMarkup, photoId, photoCaption } = options;
-    const BOT_TOKEN = BOT_TOKEN; // Get from wrangler.toml
+    const BOT_TOKEN = env.BOT_TOKEN; // Get from environment variables
     const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
     let url = TELEGRAM_API_URL;
@@ -70,8 +70,8 @@ async function sendTelegramMessage(chatId, options = {}) {
     }
 }
 
-async function getTelegramPhotoUrl(fileId) {
-    const BOT_TOKEN = BOT_TOKEN;
+async function getTelegramPhotoUrl(fileId, env) {
+    const BOT_TOKEN = env.BOT_TOKEN;
     const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
     try {
@@ -85,10 +85,10 @@ async function getTelegramPhotoUrl(fileId) {
     }
 }
 
-async function uploadPhotoToImgbb(fileId) {
-    const IMGBB_API_KEY = IMGBB_API_KEY; // Get from wrangler.toml
+async function uploadPhotoToImgbb(fileId, env) {
+    const IMGBB_API_KEY = env.IMGBB_API_KEY; // Get from environment variables
     try {
-        const fileUrl = await getTelegramPhotoUrl(fileId);
+        const fileUrl = await getTelegramPhotoUrl(fileId, env);
         if (!fileUrl) {
             console.error('Could not get Telegram file URL.');
             return null;
@@ -118,23 +118,21 @@ async function uploadPhotoToImgbb(fileId) {
 }
 
 // KV Functions
-// KV namespases are defined in wrangler.toml
-// Binding 'BOT_DATA' is available as a global variable
 const KV_KEYS = {
     SESSION: (userId) => `session:${userId}`,
     REQUEST: (requestId) => `request:${requestId}`,
     USER_REQUESTS: (userId) => `user_requests:${userId}`,
 };
 
-async function saveUserSession(userId, sessionData) {
+async function saveUserSession(userId, sessionData, env) {
     const sessionString = JSON.stringify(sessionData);
-    await BOT_DATA.put(KV_KEYS.SESSION(userId), sessionString);
+    await env.BOT_DATA.put(KV_KEYS.SESSION(userId), sessionString);
     console.log(`Session saved for user ${userId}.`);
     return true;
 }
 
-async function getUserSession(userId) {
-    const sessionString = await BOT_DATA.get(KV_KEYS.SESSION(userId));
+async function getUserSession(userId, env) {
+    const sessionString = await env.BOT_DATA.get(KV_KEYS.SESSION(userId));
     if (sessionString) {
         const session = JSON.parse(sessionString);
         console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
@@ -144,13 +142,13 @@ async function getUserSession(userId) {
     return { state: STATES.IDLE, data: {} };
 }
 
-async function clearUserSession(userId) {
-    await BOT_DATA.delete(KV_KEYS.SESSION(userId));
+async function clearUserSession(userId, env) {
+    await env.BOT_DATA.delete(KV_KEYS.SESSION(userId));
     console.log(`Session cleared for user ${userId}.`);
     return true;
 }
 
-async function saveRequest(userId, requestData) {
+async function saveRequest(userId, requestData, env) {
     const requestId = generateRequestId();
     
     // Save the request itself
@@ -160,37 +158,37 @@ async function saveRequest(userId, requestData) {
         requestId: requestId,
         createdAt: new Date().toISOString()
     });
-    await BOT_DATA.put(KV_KEYS.REQUEST(requestId), requestString);
+    await env.BOT_DATA.put(KV_KEYS.REQUEST(requestId), requestString);
 
     // Get the current list of requests for the user
-    let userRequests = await BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
+    let userRequests = await env.BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
     if (!userRequests) {
         userRequests = [];
     }
     
     // Add the new request ID and save the list
     userRequests.push(requestId);
-    await BOT_DATA.put(KV_KEYS.USER_REQUESTS(userId), JSON.stringify(userRequests));
+    await env.BOT_DATA.put(KV_KEYS.USER_REQUESTS(userId), JSON.stringify(userRequests));
 
     console.log(`Request saved: ${requestId}`);
     return requestId;
 }
 
-async function showUserRequests(chatId, userId) {
+async function showUserRequests(chatId, userId, env) {
     try {
-        let requestsIds = await BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
+        let requestsIds = await env.BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
         if (!requestsIds || !requestsIds.length) {
             await sendTelegramMessage(chatId, {
                 text: "لا توجد طلبات مقدمة من قبلك حتى الآن",
                 replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-            });
+            }, env);
             return;
         }
 
         // Fetch each request using its ID from the list
         const requests = [];
         for (const reqId of requestsIds) {
-            const reqString = await BOT_DATA.get(KV_KEYS.REQUEST(reqId));
+            const reqString = await env.BOT_DATA.get(KV_KEYS.REQUEST(reqId));
             if (reqString) {
                 requests.push(JSON.parse(reqString));
             }
@@ -226,35 +224,35 @@ async function showUserRequests(chatId, userId) {
         await sendTelegramMessage(chatId, {
             text: requestsText,
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'مساعدة'])
-        });
+        }, env);
 
     } catch (error) {
         console.error('Error showing user requests:', error);
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في عرض طلباتك",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
+        }, env);
     }
 }
 
 // Bot Logic Handlers
-async function handleTextMessage(chatId, userId, text, userInfo) {
+async function handleTextMessage(chatId, userId, text, userInfo, env) {
     try {
         console.log(`Handling text message from user ${userId}: "${text}"`);
-        await processUserCommand(chatId, userId, text, userInfo);
+        await processUserCommand(chatId, userId, text, userInfo, env);
     } catch (error) {
         console.error('Error in handleTextMessage:', error);
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى."
-        });
+        }, env);
     }
 }
 
-async function processUserCommand(chatId, userId, text, userInfo) {
+async function processUserCommand(chatId, userId, text, userInfo, env) {
     console.log(`Processing user command: ${text}`);
     
     if (text === '/start') {
-        await clearUserSession(userId);
+        await clearUserSession(userId, env);
         const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
 
 رحمهم الله وأسكنهم فسيح جناته
@@ -269,28 +267,28 @@ async function processUserCommand(chatId, userId, text, userInfo) {
         await sendTelegramMessage(chatId, {
             text: welcomeText,
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
-        });
+        }, env);
         return;
     }
 
     if (text === 'إضافة شهيد جديد' || text === '/upload') {
-        await startUploadProcess(chatId, userId, userInfo);
+        await startUploadProcess(chatId, userId, userInfo, env);
     } else if (text === 'مساعدة' || text === '/help') {
-        await showHelp(chatId);
+        await showHelp(chatId, env);
     } else if (text === 'عرض طلباتي' || text === '/my_requests') {
-        await showUserRequests(chatId, userId);
+        await showUserRequests(chatId, userId, env);
     } else if (text === 'إلغاء' || text === '/cancel') {
-        await clearUserSession(userId);
+        await clearUserSession(userId, env);
         await sendTelegramMessage(chatId, {
             text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
-        });
+        }, env);
     } else {
-        await handleUserInput(chatId, userId, text);
+        await handleUserInput(chatId, userId, text, env);
     }
 }
 
-async function startUploadProcess(chatId, userId, userInfo) {
+async function startUploadProcess(chatId, userId, userInfo, env) {
     console.log(`Starting upload process for user ${userId}.`);
     const sessionData = {
         state: STATES.WAITING_FIRST_NAME,
@@ -299,20 +297,20 @@ async function startUploadProcess(chatId, userId, userInfo) {
         createdAt: new Date().toISOString()
     };
 
-    if (await saveUserSession(userId, sessionData)) {
+    if (await saveUserSession(userId, sessionData, env)) {
         await sendTelegramMessage(chatId, {
             text: "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ، يرجى المحاولة مرة أخرى",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
+        }, env);
     }
 }
 
-async function showHelp(chatId) {
+async function showHelp(chatId, env) {
     const helpText = `مساعدة بوت معرض شهداء الساحل السوري
 
 <b>إضافة شهيد جديد:</b>
@@ -326,18 +324,18 @@ async function showHelp(chatId) {
     await sendTelegramMessage(chatId, {
         text: helpText,
         replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-    });
+    }, env);
 }
 
-async function handleUserInput(chatId, userId, text) {
-    const session = await getUserSession(userId);
+async function handleUserInput(chatId, userId, text, env) {
+    const session = await getUserSession(userId, env);
     console.log(`User ${userId} input: "${text}" with session state: ${session.state}`);
 
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
             text: "لا توجد عملية جارية. استخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
             replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-        });
+        }, env);
         return;
     }
 
@@ -345,108 +343,108 @@ async function handleUserInput(chatId, userId, text) {
 
     if (currentState === STATES.WAITING_FIRST_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال الاسم الأول" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال الاسم الأول" }, env);
             return;
         }
         session.data.first_name = text.trim();
         session.state = STATES.WAITING_FATHER_NAME;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال اسم الأب:",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_FATHER_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم الأب" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم الأب" }, env);
             return;
         }
         session.data.father_name = text.trim();
         session.state = STATES.WAITING_FAMILY_NAME;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال اسم العائلة:",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_FAMILY_NAME) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم العائلة" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم العائلة" }, env);
             return;
         }
         session.data.family_name = text.trim();
         session.state = STATES.WAITING_AGE;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال عمر الشهيد:",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_AGE) {
         const age = parseInt(text);
         if (isNaN(age) || age < 0 || age > 150) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال عمر صحيح (0-150)" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال عمر صحيح (0-150)" }, env);
             return;
         }
 
         session.data.age = age;
         session.state = STATES.WAITING_BIRTH_DATE;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_BIRTH_DATE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الولادة" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الولادة" }, env);
             return;
         }
         session.data.birth_date = text.trim();
         session.state = STATES.WAITING_MARTYRDOM_DATE;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_MARTYRDOM_DATE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الاستشهاد" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الاستشهاد" }, env);
             return;
         }
         session.data.martyrdom_date = text.trim();
         session.state = STATES.WAITING_PLACE;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إدخال مكان الاستشهاد:",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
 
     } else if (currentState === STATES.WAITING_PLACE) {
         if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال مكان الاستشهاد" });
+            await sendTelegramMessage(chatId, { text: "الرجاء إدخال مكان الاستشهاد" }, env);
             return;
         }
         session.data.place = text.trim();
         session.state = STATES.WAITING_PHOTO;
-        await saveUserSession(userId, session);
+        await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, {
             text: "الرجاء إرسال صورة الشهيد:\n\nيمكنك إضافة تعليق على الصورة إذا رغبت",
             replyMarkup: getKeyboard(['إلغاء'])
-        });
+        }, env);
     }
 }
 
-async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
+async function handlePhotoMessage(chatId, userId, photoData, caption = '', env) {
     console.log(`Handling photo message from user ${userId}.`);
-    const session = await getUserSession(userId);
+    const session = await getUserSession(userId, env);
 
     if (session.state !== STATES.WAITING_PHOTO) {
         await sendTelegramMessage(chatId, {
             text: "يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
+        }, env);
         return;
     }
 
@@ -455,24 +453,24 @@ async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
     session.data.photo_file_id = photoFileId;
     session.data.photo_caption = caption;
 
-    await completeRequest(chatId, userId, session);
+    await completeRequest(chatId, userId, session, env);
 }
 
-async function completeRequest(chatId, userId, session) {
+async function completeRequest(chatId, userId, session, env) {
     console.log(`Completing request for user ${userId}.`);
     const martyrData = session.data;
     const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
 
     let imgbbUrl = null;
     if (martyrData.photo_file_id) {
-        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id);
+        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
     }
     
     if (!imgbbUrl) {
          await sendTelegramMessage(chatId, {
             text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى.",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
+        }, env);
         return;
     }
 
@@ -492,10 +490,10 @@ async function completeRequest(chatId, userId, session) {
         status: 'pending'
     };
 
-    const requestId = await saveRequest(userId, requestData);
+    const requestId = await saveRequest(userId, requestData, env);
 
     if (requestId) {
-        await clearUserSession(userId);
+        await clearUserSession(userId, env);
 
         const messageSummary = `تم إرسال طلبك بنجاح!
 
@@ -515,24 +513,24 @@ async function completeRequest(chatId, userId, session) {
                 photoCaption: messageSummary,
                 photoId: photoFileId,
                 replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-            });
+            }, env);
         } else {
             await sendTelegramMessage(chatId, {
                 text: messageSummary,
                 replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-            });
+            }, env);
         }
 
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
+        }, env);
     }
 }
 
 // Main handler
-async function handleRequest(request) {
+async function handleRequest(request, env) {
     if (request.method === 'POST') {
         try {
             const update = await request.json();
@@ -551,14 +549,14 @@ async function handleRequest(request) {
                 };
 
                 if (message.text) {
-                    await handleTextMessage(chatId, userId, message.text, userInfo);
+                    await handleTextMessage(chatId, userId, message.text, userInfo, env);
                 } else if (message.photo) {
                     const caption = message.caption || '';
-                    await handlePhotoMessage(chatId, userId, message.photo, caption);
+                    await handlePhotoMessage(chatId, userId, message.photo, caption, env);
                 } else {
                     await sendTelegramMessage(chatId, {
                         text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
-                    });
+                    }, env);
                 }
             } else {
                 console.log('Received unsupported update type.');
@@ -585,6 +583,9 @@ async function handleRequest(request) {
     return new Response(JSON.stringify({ status: 'error', message: 'Method Not Allowed' }), { status: 405 });
 }
 
-addEventListener('fetch', event => {
-    event.respondWith(handleRequest(event.request));
-});
+// Export the handler for Cloudflare Workers
+export default {
+    async fetch(request, env, ctx) {
+        return handleRequest(request, env);
+    },
+};

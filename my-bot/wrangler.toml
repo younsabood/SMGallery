@@ -1,6 +1,6 @@
 name = "syrian-martyrs-bot"
 main = "src/index.js"
-compatibility_date = "2023-01-01"
+compatibility_date = "2024-09-21"
 
 [vars]
 BOT_TOKEN = "8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM"
