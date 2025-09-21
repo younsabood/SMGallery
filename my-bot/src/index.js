@@ -1,76 +1,4 @@
-// netlify/functions/webhook.js - Netlify Serverless Function for User Bot
-const mongoose = require('mongoose');
-const axios = require('axios');
-
-// Configuration
-// Use environment variables from Netlify, with fallback values for local development
-const BOT_TOKEN = process.env.BOT_TOKEN || '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/syrian_martyrs?retryWrites=true&w=majority&appName=Younss';
-const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '7b98d38c418169cf635290b4a31f8e95';
-
-const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
-
-// Global connection variable for reuse
-let cachedConnection = null;
-
-// MongoDB Connection with caching
-async function connectToDatabase() {
-    if (cachedConnection) {
-        console.log('Using cached MongoDB connection.');
-        return cachedConnection;
-    }
-
-    try {
-        console.log('Connecting to MongoDB...');
-        const connection = await mongoose.connect(MONGODB_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-            maxPoolSize: 5,
-            serverSelectionTimeoutMS: 5000,
-            socketTimeoutMS: 45000,
-        });
-
-        cachedConnection = connection;
-        console.log('Connected to MongoDB successfully.');
-        return connection;
-    } catch (error) {
-        console.error('MongoDB connection error:', error);
-        throw error;
-    }
-}
-
-// Schemas
-const userSessionSchema = new mongoose.Schema({
-    userId: { type: String, required: true, unique: true, index: true },
-    state: { type: String, default: 'idle' },
-    data: { type: mongoose.Schema.Types.Mixed, default: {} },
-    userInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
-    createdAt: { type: Date, default: Date.now, expires: 3600 },
-    updatedAt: { type: Date, default: Date.now }
-});
-
-const requestSchema = new mongoose.Schema({
-    requestId: { type: String, required: true, unique: true, index: true },
-    userId: { type: String, required: true, index: true },
-    martyrData: { type: mongoose.Schema.Types.Mixed, required: true },
-    userInfo: { type: mongoose.Schema.Types.Mixed, required: true },
-    status: {
-        type: String,
-        enum: ['pending', 'approved', 'rejected'],
-        default: 'pending',
-        index: true
-    },
-    createdAt: { type: Date, default: Date.now, index: true },
-    reviewedAt: { type: Date }
-});
-
-// Add indexes
-requestSchema.index({ status: 1, createdAt: -1 });
-userSessionSchema.index({ updatedAt: 1 });
-
-// Models
-const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
-const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
+// src/index.js - Cloudflare Worker for Syrian Martyrs Bot
 
 // States
 const STATES = {
@@ -90,9 +18,19 @@ function generateRequestId() {
     return Date.now().toString() + Math.random().toString(36).substr(2, 9);
 }
 
+function getKeyboard(buttons) {
+    return {
+        keyboard: buttons.map(btn => [{ text: btn }]),
+        resize_keyboard: true,
+        one_time_keyboard: false
+    };
+}
+
+// Telegram API interactions
 async function sendTelegramMessage(chatId, options = {}) {
-    console.log(`Sending message to chat ID: ${chatId}`);
     const { text, replyMarkup, photoId, photoCaption } = options;
+    const BOT_TOKEN = BOT_TOKEN; // Get from wrangler.toml
+    const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
     let url = TELEGRAM_API_URL;
     let payload = {
@@ -112,36 +50,43 @@ async function sendTelegramMessage(chatId, options = {}) {
     }
 
     if (replyMarkup) {
-        payload.reply_markup = JSON.stringify(replyMarkup);
+        payload.reply_markup = replyMarkup; // replyMarkup is already JSON object
     }
 
     try {
-        const response = await axios.post(url, payload, {
-            timeout: 10000,
+        const response = await fetch(url, {
+            method: 'POST',
+            body: JSON.stringify(payload),
             headers: {
                 'Content-Type': 'application/json'
             }
         });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}, message: ${await response.text()}`);
+        }
         console.log(`Message sent successfully to chat ${chatId}`);
-        return response.data;
     } catch (error) {
-        console.error(`Error sending message to chat ${chatId}:`, error.response?.data || error.message);
-        return null;
+        console.error(`Error sending message to chat ${chatId}:`, error.message);
     }
 }
 
 async function getTelegramPhotoUrl(fileId) {
+    const BOT_TOKEN = BOT_TOKEN;
+    const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
+
     try {
-        const response = await axios.get(`${TELEGRAM_API_URL}getFile?file_id=${fileId}`);
-        const filePath = response.data.result.file_path;
+        const response = await fetch(`${TELEGRAM_API_URL}getFile?file_id=${fileId}`);
+        const data = await response.json();
+        const filePath = data.result.file_path;
         return `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
     } catch (error) {
-        console.error('Error getting Telegram file path:', error.response?.data || error.message);
+        console.error('Error getting Telegram file path:', error.message);
         return null;
     }
 }
 
 async function uploadPhotoToImgbb(fileId) {
+    const IMGBB_API_KEY = IMGBB_API_KEY; // Get from wrangler.toml
     try {
         const fileUrl = await getTelegramPhotoUrl(fileId);
         if (!fileUrl) {
@@ -149,97 +94,92 @@ async function uploadPhotoToImgbb(fileId) {
             return null;
         }
 
-        const response = await axios.post('https://api.imgbb.com/1/upload', null, {
-            params: {
-                key: IMGBB_API_KEY,
-                image: fileUrl
-            }
+        const formData = new FormData();
+        formData.append('key', IMGBB_API_KEY);
+        formData.append('image', fileUrl);
+
+        const response = await fetch('https://api.imgbb.com/1/upload', {
+            method: 'POST',
+            body: formData,
         });
 
-        if (response.data.success) {
+        const data = await response.json();
+        if (data.success) {
             console.log('Photo uploaded to imgbb successfully.');
-            return response.data.data.url;
+            return data.data.url;
         } else {
-            console.error('imgbb upload failed:', response.data.error.message);
+            console.error('imgbb upload failed:', data.error.message);
             return null;
         }
     } catch (error) {
-        console.error('Error uploading photo to imgbb:', error.response?.data || error.message);
+        console.error('Error uploading photo to imgbb:', error.message);
         return null;
     }
 }
 
-function getKeyboard(buttons) {
-    return {
-        keyboard: buttons.map(btn => [{ text: btn }]),
-        resize_keyboard: true,
-        one_time_keyboard: false
-    };
-}
+// KV Functions
+// KV namespases are defined in wrangler.toml
+// Binding 'BOT_DATA' is available as a global variable
+const KV_KEYS = {
+    SESSION: (userId) => `session:${userId}`,
+    REQUEST: (requestId) => `request:${requestId}`,
+    USER_REQUESTS: (userId) => `user_requests:${userId}`,
+};
 
 async function saveUserSession(userId, sessionData) {
-    try {
-        const result = await UserSession.findOneAndUpdate(
-            { userId: userId.toString() },
-            { ...sessionData, updatedAt: new Date() },
-            { upsert: true, new: true }
-        );
-        console.log(`Session saved for user ${userId}.`);
-        return !!result;
-    } catch (error) {
-        console.error(`Error saving session for user ${userId}:`, error);
-        return false;
-    }
+    const sessionString = JSON.stringify(sessionData);
+    await BOT_DATA.put(KV_KEYS.SESSION(userId), sessionString);
+    console.log(`Session saved for user ${userId}.`);
+    return true;
 }
 
 async function getUserSession(userId) {
-    try {
-        const session = await UserSession.findOne({ userId: userId.toString() });
-        console.log(`Session retrieved for user ${userId}. State: ${session ? session.state : 'None'}`);
-        return session || { state: STATES.IDLE, data: {} };
-    } catch (error) {
-        console.error(`Error getting session for user ${userId}:`, error);
-        return { state: STATES.IDLE, data: {} };
+    const sessionString = await BOT_DATA.get(KV_KEYS.SESSION(userId));
+    if (sessionString) {
+        const session = JSON.parse(sessionString);
+        console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
+        return session;
     }
+    console.log(`No session found for user ${userId}.`);
+    return { state: STATES.IDLE, data: {} };
 }
 
 async function clearUserSession(userId) {
-    try {
-        await UserSession.deleteOne({ userId: userId.toString() });
-        console.log(`Session cleared for user ${userId}.`);
-        return true;
-    } catch (error) {
-        console.error(`Error clearing session for user ${userId}:`, error);
-        return false;
-    }
+    await BOT_DATA.delete(KV_KEYS.SESSION(userId));
+    console.log(`Session cleared for user ${userId}.`);
+    return true;
 }
 
 async function saveRequest(userId, requestData) {
-    try {
-        const requestId = generateRequestId();
-        const request = new Request({
-            requestId,
-            userId: userId.toString(),
-            ...requestData
-        });
+    const requestId = generateRequestId();
+    
+    // Save the request itself
+    const requestString = JSON.stringify({
+        ...requestData,
+        userId: userId,
+        requestId: requestId,
+        createdAt: new Date().toISOString()
+    });
+    await BOT_DATA.put(KV_KEYS.REQUEST(requestId), requestString);
 
-        await request.save();
-        console.log(`Request saved: ${requestId}`);
-        return requestId;
-    } catch (error) {
-        console.error(`Error saving request for user ${userId}:`, error);
-        return null;
+    // Get the current list of requests for the user
+    let userRequests = await BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
+    if (!userRequests) {
+        userRequests = [];
     }
+    
+    // Add the new request ID and save the list
+    userRequests.push(requestId);
+    await BOT_DATA.put(KV_KEYS.USER_REQUESTS(userId), JSON.stringify(userRequests));
+
+    console.log(`Request saved: ${requestId}`);
+    return requestId;
 }
 
 async function showUserRequests(chatId, userId) {
     try {
-        const requests = await Request.find({ userId: userId.toString() })
-            .sort({ createdAt: -1 })
-            .limit(10);
-        console.log(`Found ${requests.length} requests for user ${userId}.`);
-
-        if (!requests.length) {
+        let requestsIds = await BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
+        if (!requestsIds || !requestsIds.length) {
             await sendTelegramMessage(chatId, {
                 text: "لا توجد طلبات مقدمة من قبلك حتى الآن",
                 replyMarkup: getKeyboard(['إضافة شهيد جديد'])
@@ -247,12 +187,24 @@ async function showUserRequests(chatId, userId) {
             return;
         }
 
+        // Fetch each request using its ID from the list
+        const requests = [];
+        for (const reqId of requestsIds) {
+            const reqString = await BOT_DATA.get(KV_KEYS.REQUEST(reqId));
+            if (reqString) {
+                requests.push(JSON.parse(reqString));
+            }
+        }
+        
+        // Sort the requests
+        requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
         let requestsText = "<b>طلباتك المقدمة:</b>\n\n";
 
         for (const req of requests) {
             const martyrName = req.martyrData.full_name || 'غير محدد';
             const status = req.status;
-            const createdAt = req.createdAt.toISOString().substring(0, 10);
+            const createdAt = new Date(req.createdAt).toISOString().substring(0, 10);
 
             const statusEmoji = {
                 'pending': '⏳',
@@ -285,6 +237,7 @@ async function showUserRequests(chatId, userId) {
     }
 }
 
+// Bot Logic Handlers
 async function handleTextMessage(chatId, userId, text, userInfo) {
     try {
         console.log(`Handling text message from user ${userId}: "${text}"`);
@@ -343,7 +296,7 @@ async function startUploadProcess(chatId, userId, userInfo) {
         state: STATES.WAITING_FIRST_NAME,
         data: {},
         userInfo: userInfo,
-        createdAt: new Date()
+        createdAt: new Date().toISOString()
     };
 
     if (await saveUserSession(userId, sessionData)) {
@@ -579,11 +532,10 @@ async function completeRequest(chatId, userId, session) {
 }
 
 // Main handler
-exports.handler = async (event, context) => {
-    // Check for POST method
-    if (event.httpMethod === 'POST') {
+async function handleRequest(request) {
+    if (request.method === 'POST') {
         try {
-            const update = JSON.parse(event.body);
+            const update = await request.json();
             console.log('Received update from Telegram');
 
             if (update.message) {
@@ -597,8 +549,6 @@ exports.handler = async (event, context) => {
                     last_name: message.from.last_name || '',
                     username: message.from.username || ''
                 };
-
-                await connectToDatabase();
 
                 if (message.text) {
                     await handleTextMessage(chatId, userId, message.text, userInfo);
@@ -614,48 +564,27 @@ exports.handler = async (event, context) => {
                 console.log('Received unsupported update type.');
             }
 
-            return {
-                statusCode: 200,
-                body: JSON.stringify({ status: 'ok' }),
-            };
+            return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+
         } catch (error) {
             console.error('Error processing webhook:', error);
-            return {
-                statusCode: 200,
-                body: JSON.stringify({
-                    status: 'error',
-                    message: 'Internal error occurred',
-                    error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
-                }),
-            };
+            return new Response(JSON.stringify({
+                status: 'error',
+                message: 'Internal error occurred',
+                error: error.message
+            }), { status: 500 });
         }
-    } else if (event.httpMethod === 'GET') {
-        // Handle GET requests for a basic health check
-        try {
-            await connectToDatabase();
-            return {
-                statusCode: 200,
-                body: JSON.stringify({
-                    "status": "ok",
-                    "message": "Syrian Martyrs Bot is running!",
-                    "mongodb_status": "connected",
-                    "platform": "Netlify Serverless"
-                }),
-            };
-        } catch (error) {
-            return {
-                statusCode: 500,
-                body: JSON.stringify({
-                    "status": "error",
-                    "message": "Bot is not connected to MongoDB.",
-                    "error": error.message
-                }),
-            };
-        }
+    } else if (request.method === 'GET') {
+        return new Response(JSON.stringify({
+            "status": "ok",
+            "message": "Syrian Martyrs Bot is running on Cloudflare Workers!",
+            "platform": "Cloudflare Workers"
+        }), { status: 200 });
     }
 
-    return {
-        statusCode: 405,
-        body: JSON.stringify({ status: 'error', message: 'Method Not Allowed' }),
-    };
-};
+    return new Response(JSON.stringify({ status: 'error', message: 'Method Not Allowed' }), { status: 405 });
+}
+
+addEventListener('fetch', event => {
+    event.respondWith(handleRequest(event.request));
+});
