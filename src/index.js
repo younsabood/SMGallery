@@ -42,7 +42,7 @@ const KV_KEYS = {
     SYSTEM_STATS: () => `system_stats`,
     
     // Operations Log - سجل العمليات
-    OPERATIONS_LOG: () => `operations_log`
+    OPERATIONS_LOG: () => `operations_log`,
     
     // Admin sessions
     ADMIN_SESSION: (userId) => `admin_session:${userId}`,
@@ -679,80 +679,6 @@ async function handlePhotoMessage(chatId, userId, photoData, caption = '', env) 
     session.data.photo_caption = caption;
 
     await completeRequest(chatId, userId, session, env);
-}
-
-async function completeRequest(chatId, userId, session, env) {
-    console.log(`Completing request for user ${userId}.`);
-    const martyrData = session.data;
-    const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
-
-    let imgbbUrl = null;
-    if (martyrData.photo_file_id) {
-        await sendTelegramMessage(chatId, {
-            text: "جاري تحميل الصورة، يرجى الانتظار...",
-        }, env);
-        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
-    }
-    
-    if (!imgbbUrl) {
-         await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى.",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        }, env);
-        return;
-    }
-
-    const requestData = {
-        martyrData: {
-            name_first: martyrData.first_name || '',
-            name_father: martyrData.father_name || '',
-            name_family: martyrData.family_name || '',
-            full_name: fullName,
-            age: martyrData.age || null,
-            date_birth: martyrData.birth_date || '',
-            date_martyrdom: martyrData.martyrdom_date || '',
-            place: martyrData.place || '',
-            imageUrl: imgbbUrl,
-        },
-        userInfo: session.userInfo
-    };
-
-    const requestId = await saveRequest(userId, requestData, env);
-
-    if (requestId) {
-        await clearUserSession(userId, env);
-
-        const messageSummary = `تم إرسال طلبك بنجاح!
-
-<b>ملخص البيانات:</b>
-الاسم: ${fullName}
-العمر: ${martyrData.age || 'غير متوفر'}
-الولادة: ${martyrData.birth_date || 'غير متوفر'}
-الاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}
-المكان: ${martyrData.place || 'غير متوفر'}
-
-سيتم مراجعة طلبك من قبل الإدارة
-يمكنك متابعة حالة طلبك باستخدام <b>عرض طلباتي</b>`;
-
-        const photoFileId = martyrData.photo_file_id;
-        if (photoFileId) {
-            await sendTelegramMessage(chatId, {
-                photoCaption: messageSummary,
-                photoId: photoFileId,
-                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-            }, env);
-        } else {
-            await sendTelegramMessage(chatId, {
-                text: messageSummary,
-                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-            }, env);
-        }
-    } else {
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        }, env);
-    }
 }
 
 async function completeRequest(chatId, userId, session, env) {
