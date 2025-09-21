@@ -1,10 +1,9 @@
-// api/webhook.js - Vercel Serverless Function
+// api/webhook.js - Vercel Serverless Function for User Bot
 const mongoose = require('mongoose');
 const axios = require('axios');
 
 // Configuration
 const BOT_TOKEN = process.env.BOT_TOKEN || '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID || '5679396406';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '7b98d38c418169cf635290b4a31f8e95';
 
@@ -49,20 +48,6 @@ const userSessionSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 
-const martyrSchema = new mongoose.Schema({
-    nameFirst: { type: String, required: true },
-    nameFather: { type: String, required: true },
-    nameFamily: { type: String, required: true },
-    fullName: { type: String, required: true, index: true },
-    age: { type: Number },
-    dateBirth: { type: String },
-    dateMartyrdom: { type: String, required: true },
-    place: { type: String, required: true },
-    imageUrl: { type: String },
-    createdAt: { type: Date, default: Date.now, index: true },
-    updatedAt: { type: Date, default: Date.now }
-});
-
 const requestSchema = new mongoose.Schema({
     requestId: { type: String, required: true, unique: true, index: true },
     userId: { type: String, required: true, index: true },
@@ -84,7 +69,6 @@ userSessionSchema.index({ updatedAt: 1 });
 
 // Models
 const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
-const Martyr = mongoose.models.Martyr || mongoose.model('Martyr', martyrSchema);
 const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
 
 // States
@@ -192,16 +176,6 @@ function getKeyboard(buttons) {
     };
 }
 
-function getInlineKeyboard(buttons) {
-    return {
-        inline_keyboard: buttons.map(btn => [{
-            text: btn.text,
-            callback_data: btn.callback_data
-        }])
-    };
-}
-
-// Database Functions
 async function saveUserSession(userId, sessionData) {
     try {
         const result = await UserSession.findOneAndUpdate(
@@ -254,291 +228,6 @@ async function saveRequest(userId, requestData) {
     } catch (error) {
         console.error(`Error saving request for user ${userId}:`, error);
         return null;
-    }
-}
-
-async function updateRequestStatus(requestId, newStatus, userId) {
-    const session = await mongoose.startSession();
-
-    try {
-        await session.withTransaction(async () => {
-            const request = await Request.findOne({ requestId }).session(session);
-            if (!request) {
-                throw new Error('Request not found');
-            }
-
-            if (newStatus === 'approved') {
-                const martyrData = new Martyr({
-                    nameFirst: request.martyrData.name_first,
-                    nameFather: request.martyrData.name_father,
-                    nameFamily: request.martyrData.name_family,
-                    fullName: request.martyrData.full_name,
-                    age: request.martyrData.age,
-                    dateBirth: request.martyrData.date_birth,
-                    dateMartyrdom: request.martyrData.date_martyrdom,
-                    place: request.martyrData.place,
-                    imageUrl: request.martyrData.imageUrl
-                });
-
-                await martyrData.save({ session });
-                console.log(`Martyr data saved for request ID: ${requestId}`);
-
-                request.status = 'approved';
-                request.reviewedAt = new Date();
-                await request.save({ session });
-                console.log(`Request ID: ${requestId} status updated to approved.`);
-
-                const martyrName = request.martyrData.full_name || 'غير محدد';
-                setTimeout(async () => {
-                    await sendTelegramMessage(userId.toString(), {
-                        text: `<b>تهانينا!</b>\n\nتم قبول طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nشكراً لك على مساهمتك في حفظ ذكرى شهدائنا الأبرار.`
-                    });
-                }, 1000);
-
-            } else if (newStatus === 'rejected') {
-                await Request.deleteOne({ requestId }).session(session);
-                console.log(`Rejected Request ID: ${requestId} has been deleted.`);
-
-                const martyrName = request.martyrData.full_name || 'غير محدد';
-                setTimeout(async () => {
-                    await sendTelegramMessage(userId.toString(), {
-                        text: `<b>عذراً،</b>\n\nتم رفض طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nيمكنك تقديم طلب جديد بعد مراجعة البيانات والتأكد من صحتها.\n\nللاستفسار تواصل مع: @DevYouns`
-                    });
-                }, 1000);
-            }
-        });
-
-        return true;
-    } catch (error) {
-        console.error('Error updating request status:', error);
-        return false;
-    } finally {
-        await session.endSession();
-    }
-}
-
-// Message Handlers
-async function handleTextMessage(chatId, userId, text, userInfo) {
-    try {
-        console.log(`Handling text message from user ${userId}: "${text}"`);
-        console.log(`Admin User ID from env: ${ADMIN_USER_ID}`);
-        console.log(`Current User ID: ${userId}`);
-
-        await processUserCommand(chatId, userId, text, userInfo);
-    } catch (error) {
-        console.error('Error in handleTextMessage:', error);
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى."
-        });
-    }
-}
-
-async function processUserCommand(chatId, userId, text, userInfo) {
-    console.log(`Processing user command: ${text}`);
-    
-    const isAdmin = userId.toString() === ADMIN_USER_ID.toString();
-    console.log(`User ${userId} - Is Admin: ${isAdmin}`);
-    
-    if (text === '/start') {
-        await clearUserSession(userId);
-        
-        if (isAdmin) {
-            const adminWelcomeText = `مرحباً بك في لوحة الإدارة
-
-بوت معرض شهداء الساحل السوري
-رحمهم الله وأسكنهم فسيح جناته
-
-أوامر الإدارة:
-• مراجعة الطلبات المعلقة
-• إضافة شهيد جديد (كإدارة)
-• عرض إحصائيات النظام
-
-أوامر المستخدمين العادية متاحة أيضاً`;
-
-            await sendTelegramMessage(chatId, {
-                text: adminWelcomeText,
-                replyMarkup: getKeyboard([
-                    'مراجعة الطلبات المعلقة', 
-                    'إضافة شهيد جديد', 
-                    'عرض إحصائيات النظام',
-                    'عرض طلباتي',
-                    'مساعدة'
-                ])
-            });
-        } else {
-            const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
-
-رحمهم الله وأسكنهم فسيح جناته
-
-الأوامر المتاحة:
-• إضافة شهيد جديد
-• عرض طلباتي
-• المساعدة
-
-لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
-
-            await sendTelegramMessage(chatId, {
-                text: welcomeText,
-                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
-            });
-        }
-        return;
-    }
-
-    if (isAdmin) {
-        if (text === 'مراجعة الطلبات المعلقة' || text === '/review') {
-            await reviewPendingRequests(chatId);
-            return;
-        } else if (text === 'عرض إحصائيات النظام' || text === '/stats') {
-            await showSystemStats(chatId);
-            return;
-        } else if (text.startsWith('/approve')) {
-            const parts = text.split(' ');
-            if (parts.length === 3) {
-                await approveRequest(chatId, parts[1], parts[2]);
-            } else {
-                await sendTelegramMessage(chatId, {
-                    text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /approve [request_id] [user_id]"
-                });
-            }
-            return;
-        } else if (text.startsWith('/reject')) {
-            const parts = text.split(' ');
-            if (parts.length === 3) {
-                await rejectRequest(chatId, parts[1], parts[2]);
-            } else {
-                await sendTelegramMessage(chatId, {
-                    text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /reject [request_id] [user_id]"
-                });
-            }
-            return;
-        }
-    }
-
-    if (text === 'إضافة شهيد جديد' || text === '/upload') {
-        await startUploadProcess(chatId, userId, userInfo);
-    } else if (text === 'مساعدة' || text === '/help') {
-        await showHelp(chatId, isAdmin);
-    } else if (text === 'عرض طلباتي' || text === '/my_requests') {
-        await showUserRequests(chatId, userId);
-    } else if (text === 'إلغاء' || text === '/cancel') {
-        await clearUserSession(userId);
-        const keyboard = isAdmin ? 
-            ['مراجعة الطلبات المعلقة', 'إضافة شهيد جديد', 'عرض إحصائيات النظام'] :
-            ['إضافة شهيد جديد'];
-        
-        await sendTelegramMessage(chatId, {
-            text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
-            replyMarkup: getKeyboard(keyboard)
-        });
-    } else {
-        await handleUserInput(chatId, userId, text);
-    }
-}
-
-async function startUploadProcess(chatId, userId, userInfo) {
-    console.log(`Starting upload process for user ${userId}.`);
-    const sessionData = {
-        state: STATES.WAITING_FIRST_NAME,
-        data: {},
-        userInfo: userInfo,
-        createdAt: new Date()
-    };
-
-    if (await saveUserSession(userId, sessionData)) {
-        await sendTelegramMessage(chatId, {
-            text: "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:",
-            replyMarkup: getKeyboard(['إلغاء'])
-        });
-    } else {
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ، يرجى المحاولة مرة أخرى",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
-    }
-}
-
-async function showHelp(chatId, isAdmin = false) {
-    if (isAdmin) {
-        const adminHelpText = `مساعدة لوحة الإدارة - بوت معرض شهداء الساحل السوري
-
-<b>أوامر الإدارة الخاصة:</b>
-<b>مراجعة الطلبات المعلقة</b> - عرض ومراجعة طلبات إضافة الشهداء
-<b>عرض إحصائيات النظام</b> - عرض إحصائيات شاملة
-<b>/approve [request_id] [user_id]</b> - قبول طلب محدد
-<b>/reject [request_id] [user_id]</b> - رفض طلب محدد
-
-<b>الأوامر العامة (متاحة للإدارة أيضاً):</b>
-<b>إضافة شهيد جديد</b> - إضافة شهيد جديد للمعرض
-<b>عرض طلباتي</b> - عرض حالة طلباتك المقدمة
-
-للدعم التقني: @DevYouns`;
-
-        await sendTelegramMessage(chatId, {
-            text: adminHelpText,
-            replyMarkup: getKeyboard([
-                'مراجعة الطلبات المعلقة', 
-                'إضافة شهيد جديد', 
-                'عرض إحصائيات النظام'
-            ])
-        });
-    } else {
-        const helpText = `مساعدة بوت معرض شهداء الساحل السوري
-
-<b>إضافة شهيد جديد:</b>
-يمكنك إضافة شهيد جديد باتباع الخطوات المطلوبة
-
-<b>عرض طلباتي:</b>
-يمكنك مشاهدة حالة جميع طلباتك المقدمة
-
-للمساعدة الإضافية، تواصل مع المدير: @DevYouns`;
-
-        await sendTelegramMessage(chatId, {
-            text: helpText,
-            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-        });
-    }
-}
-
-async function showSystemStats(chatId) {
-    try {
-        const [totalRequests, pendingRequests, approvedRequests, rejectedRequests, totalMartyrs] = await Promise.all([
-            Request.countDocuments(),
-            Request.countDocuments({ status: 'pending' }),
-            Request.countDocuments({ status: 'approved' }),
-            Request.countDocuments({ status: 'rejected' }),
-            Martyr.countDocuments()
-        ]);
-
-        const statsText = `<b>إحصائيات النظام</b>
-
-<b>الطلبات:</b>
-إجمالي الطلبات: ${totalRequests}
-قيد المراجعة: ${pendingRequests}
-تم القبول: ${approvedRequests}
-تم الرفض: ${rejectedRequests}
-
-<b>الشهداء:</b>
-إجمالي الشهداء المسجلين: ${totalMartyrs}
-
-<b>معدل القبول:</b>
-${totalRequests > 0 ? Math.round((approvedRequests / totalRequests) * 100) : 0}%`;
-
-        await sendTelegramMessage(chatId, {
-            text: statsText,
-            replyMarkup: getKeyboard([
-                'مراجعة الطلبات المعلقة', 
-                'إضافة شهيد جديد',
-                'مساعدة'
-            ])
-        });
-
-    } catch (error) {
-        console.error('Error showing system stats:', error);
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في عرض الإحصائيات",
-            replyMarkup: getKeyboard(['مراجعة الطلبات المعلقة', 'إضافة شهيد جديد'])
-        });
     }
 }
 
@@ -595,6 +284,97 @@ async function showUserRequests(chatId, userId) {
     }
 }
 
+async function handleTextMessage(chatId, userId, text, userInfo) {
+    try {
+        console.log(`Handling text message from user ${userId}: "${text}"`);
+        await processUserCommand(chatId, userId, text, userInfo);
+    } catch (error) {
+        console.error('Error in handleTextMessage:', error);
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى."
+        });
+    }
+}
+
+async function processUserCommand(chatId, userId, text, userInfo) {
+    console.log(`Processing user command: ${text}`);
+    
+    if (text === '/start') {
+        await clearUserSession(userId);
+        const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
+
+رحمهم الله وأسكنهم فسيح جناته
+
+الأوامر المتاحة:
+• إضافة شهيد جديد
+• عرض طلباتي
+• المساعدة
+
+لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
+
+        await sendTelegramMessage(chatId, {
+            text: welcomeText,
+            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+        });
+        return;
+    }
+
+    if (text === 'إضافة شهيد جديد' || text === '/upload') {
+        await startUploadProcess(chatId, userId, userInfo);
+    } else if (text === 'مساعدة' || text === '/help') {
+        await showHelp(chatId);
+    } else if (text === 'عرض طلباتي' || text === '/my_requests') {
+        await showUserRequests(chatId, userId);
+    } else if (text === 'إلغاء' || text === '/cancel') {
+        await clearUserSession(userId);
+        await sendTelegramMessage(chatId, {
+            text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
+            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+        });
+    } else {
+        await handleUserInput(chatId, userId, text);
+    }
+}
+
+async function startUploadProcess(chatId, userId, userInfo) {
+    console.log(`Starting upload process for user ${userId}.`);
+    const sessionData = {
+        state: STATES.WAITING_FIRST_NAME,
+        data: {},
+        userInfo: userInfo,
+        createdAt: new Date()
+    };
+
+    if (await saveUserSession(userId, sessionData)) {
+        await sendTelegramMessage(chatId, {
+            text: "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:",
+            replyMarkup: getKeyboard(['إلغاء'])
+        });
+    } else {
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ، يرجى المحاولة مرة أخرى",
+            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+        });
+    }
+}
+
+async function showHelp(chatId) {
+    const helpText = `مساعدة بوت معرض شهداء الساحل السوري
+
+<b>إضافة شهيد جديد:</b>
+يمكنك إضافة شهيد جديد باتباع الخطوات المطلوبة
+
+<b>عرض طلباتي:</b>
+يمكنك مشاهدة حالة جميع طلباتك المقدمة
+
+للمساعدة الإضافية، تواصل مع المدير: @DevYouns`;
+
+    await sendTelegramMessage(chatId, {
+        text: helpText,
+        replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
+    });
+}
+
 async function handleUserInput(chatId, userId, text) {
     const session = await getUserSession(userId);
     console.log(`User ${userId} input: "${text}" with session state: ${session.state}`);
@@ -602,7 +382,7 @@ async function handleUserInput(chatId, userId, text) {
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
             text: "لا توجد عملية جارية. استخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
         });
         return;
     }
@@ -789,122 +569,10 @@ async function completeRequest(chatId, userId, session) {
             });
         }
 
-        const adminNotificationText = `<b>طلب جديد للمراجعة</b>\n\n<b>ID الطلب:</b> <code>${requestId}</code>\n<b>ID المستخدم:</b> <code>${userId}</code>\n<b>الاسم:</b> ${fullName}\n\n<b>مقدم الطلب:</b> ${session.userInfo.first_name || ''} ${session.userInfo.last_name || ''} (@${session.userInfo.username || ''})\n\nيمكنك مراجعة الطلب باستخدام /review`;
-        await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
-
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
             replyMarkup: getKeyboard(['إضافة شهيد جديد'])
-        });
-    }
-}
-
-async function reviewPendingRequests(chatId) {
-    try {
-        const requests = await Request.find({ status: 'pending' })
-            .sort({ createdAt: -1 })
-            .limit(5);
-
-        console.log(`Found ${requests.length} pending requests to review.`);
-        if (!requests.length) {
-            await sendTelegramMessage(chatId, {
-                text: "لا توجد طلبات معلقة للمراجعة في الوقت الحالي."
-            });
-            return;
-        }
-
-        for (const request of requests) {
-            const martyrData = request.martyrData;
-            const userInfo = request.userInfo;
-            const userId = request.userId;
-
-            const summary = `<b>طلب جديد للمراجعة</b>\n\n<b>ID:</b> <code>${request.requestId}</code>\n<b>الاسم:</b> ${martyrData.full_name || 'غير محدد'}\n<b>العمر:</b> ${martyrData.age || 'غير متوفر'}\n<b>تاريخ الولادة:</b> ${martyrData.date_birth || 'غير متوفر'}\n<b>تاريخ الاستشهاد:</b> ${martyrData.date_martyrdom || 'غير متوفر'}\n<b>مكان الاستشهاد:</b> ${martyrData.place || 'غير متوفر'}\n\n<b>مقدم الطلب:</b> ${userInfo.first_name || ''} ${userInfo.last_name || ''} (@${userInfo.username || ''})\n<b>ID المستخدم:</b> <code>${userId}</code>`;
-
-            const inlineKeyboard = getInlineKeyboard([
-                { text: 'قبول', callback_data: `approve_${request.requestId}_${userId}` },
-                { text: 'رفض', callback_data: `reject_${request.requestId}_${userId}` }
-            ]);
-
-            await sendTelegramMessage(chatId, {
-                text: summary,
-                replyMarkup: inlineKeyboard
-            });
-        }
-    } catch (error) {
-        console.error('Error reviewing pending requests:', error);
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ أثناء محاولة مراجعة الطلبات."
-        });
-    }
-}
-
-async function approveRequest(chatId, requestId, userIdReq) {
-    try {
-        if (await updateRequestStatus(requestId, 'approved', userIdReq)) {
-            await sendTelegramMessage(chatId, {
-                text: `تم قبول الطلب <code>${requestId}</code> بنجاح.`
-            });
-        } else {
-            await sendTelegramMessage(chatId, {
-                text: `حدث خطأ في قبول الطلب <code>${requestId}</code>.`
-            });
-        }
-    } catch (error) {
-        console.error('Error approving request:', error);
-        await sendTelegramMessage(chatId, {
-            text: `حدث خطأ في قبول الطلب <code>${requestId}</code>.`
-        });
-    }
-}
-
-async function rejectRequest(chatId, requestId, userIdReq) {
-    try {
-        if (await updateRequestStatus(requestId, 'rejected', userIdReq)) {
-            await sendTelegramMessage(chatId, {
-                text: `تم رفض الطلب <code>${requestId}</code> بنجاح.`
-            });
-        } else {
-            await sendTelegramMessage(chatId, {
-                text: `حدث خطأ في رفض الطلب <code>${requestId}</code>.`
-            });
-        }
-    } catch (error) {
-        console.error('Error rejecting request:', error);
-        await sendTelegramMessage(chatId, {
-            text: `حدث خطأ في رفض الطلب <code>${requestId}</code>.`
-        });
-    }
-}
-
-async function handleCallbackQuery(chatId, callbackData) {
-    try {
-        console.log(`Handling callback query: ${callbackData}`);
-        const parts = callbackData.split('_');
-        if (parts.length < 3) {
-            await sendTelegramMessage(chatId, {
-                text: "بيانات غير صحيحة"
-            });
-            return;
-        }
-
-        const action = parts[0];
-        const requestId = parts[1];
-        const userIdOfRequest = parts[2];
-
-        if (action === 'approve') {
-            await approveRequest(chatId, requestId, userIdOfRequest);
-        } else if (action === 'reject') {
-            await rejectRequest(chatId, requestId, userIdOfRequest);
-        } else {
-            await sendTelegramMessage(chatId, {
-                text: "عمل غير مدعوم"
-            });
-        }
-    } catch (error) {
-        console.error('Error handling callback query:', error);
-        await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في معالجة طلبك."
         });
     }
 }
@@ -940,11 +608,8 @@ module.exports = async (req, res) => {
                         text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
                     });
                 }
-            } else if (update.callback_query) {
-                const callbackQuery = update.callback_query;
-                const chatId = callbackQuery.message.chat.id;
-                await connectToDatabase();
-                await handleCallbackQuery(chatId, callbackQuery.data);
+            } else { // No callback queries for user bot
+                console.log('Received unsupported update type.');
             }
 
             return res.status(200).json({ status: 'ok' });
