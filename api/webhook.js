@@ -69,10 +69,10 @@ const requestSchema = new mongoose.Schema({
 
 // Add TTL index to automatically delete pending requests after 30 days
 // 30 days = 30 * 24 * 60 * 60 = 2592000 seconds
-requestSchema.index(
-    { "createdAt": 1 }, 
-    { expireAfterSeconds: 2592000, partialFilterExpression: { status: 'pending' } }
-);
+// requestSchema.index(
+//     { "createdAt": 1 }, 
+//     { expireAfterSeconds: 2592000, partialFilterExpression: { status: 'pending' } }
+// );
 // Add regular index for better performance
 requestSchema.index({ status: 1, createdAt: -1 });
 userSessionSchema.index({ updatedAt: 1 });
