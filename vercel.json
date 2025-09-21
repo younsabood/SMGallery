@@ -21,7 +21,6 @@
     }
   },
   "env": {
-    "BOT_TOKEN": "BOT_TOKEN",
     "ADMIN_USER_ID": "ADMIN_USER_ID",
     "NODE_ENV": "production"
   }

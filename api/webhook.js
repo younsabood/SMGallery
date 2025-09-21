@@ -3,12 +3,13 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 
 // Configuration
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
-const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
-
-// Directly use the connection string with the password
+// Using direct strings for troubleshooting.
+// REMEMBER to replace with process.env.YOUR_VARIABLE for production!
+const BOT_TOKEN = '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
+const ADMIN_USER_ID = 'YOUR_ADMIN_USER_ID'; // Replace with your actual user ID
 const MONGODB_URI = 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
+
+const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
 // Global connection variable for reuse
 let cachedConnection = null;
@@ -16,22 +17,22 @@ let cachedConnection = null;
 // MongoDB Connection with caching for Vercel
 async function connectToDatabase() {
     if (cachedConnection) {
+        console.log('✅ Using cached MongoDB connection.');
         return cachedConnection;
     }
 
     try {
+        console.log('⏳ Connecting to MongoDB...');
         const connection = await mongoose.connect(MONGODB_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
             maxPoolSize: 5, // Limit pool size for serverless
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
-            // Removed: bufferMaxEntries: 0,
-            // Removed: bufferCommands: false,
         });
 
         cachedConnection = connection;
-        console.log('✅ Connected to MongoDB');
+        console.log('✅ Connected to MongoDB successfully.');
         return connection;
     } catch (error) {
         console.error('❌ MongoDB connection error:', error);
@@ -105,6 +106,7 @@ function generateRequestId() {
 }
 
 async function sendTelegramMessage(chatId, options = {}) {
+    console.log(`Sending message to chat ID: ${chatId}`);
     const { text, replyMarkup, photoId, photoCaption } = options;
 
     let url = TELEGRAM_API_URL;
@@ -168,6 +170,7 @@ async function saveUserSession(userId, sessionData) {
             { ...sessionData, updatedAt: new Date() },
             { upsert: true, new: true }
         );
+        console.log(`✅ Session saved for user ${userId}.`);
         return !!result;
     } catch (error) {
         console.error(`❌ Error saving session for user ${userId}:`, error);
@@ -178,6 +181,7 @@ async function saveUserSession(userId, sessionData) {
 async function getUserSession(userId) {
     try {
         const session = await UserSession.findOne({ userId: userId.toString() });
+        console.log(`✅ Session retrieved for user ${userId}. State: ${session ? session.state : 'None'}`);
         return session || { state: STATES.IDLE, data: {} };
     } catch (error) {
         console.error(`❌ Error getting session for user ${userId}:`, error);
@@ -188,6 +192,7 @@ async function getUserSession(userId) {
 async function clearUserSession(userId) {
     try {
         await UserSession.deleteOne({ userId: userId.toString() });
+        console.log(`✅ Session cleared for user ${userId}.`);
         return true;
     } catch (error) {
         console.error(`❌ Error clearing session for user ${userId}:`, error);
@@ -238,11 +243,13 @@ async function updateRequestStatus(requestId, newStatus, userId) {
                 });
 
                 await martyrData.save({ session });
+                console.log(`✅ Martyr data saved for request ID: ${requestId}`);
 
                 // Update request status
                 request.status = 'approved';
                 request.reviewedAt = new Date();
                 await request.save({ session });
+                console.log(`✅ Request ID: ${requestId} status updated to approved.`);
 
                 // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
@@ -256,6 +263,7 @@ async function updateRequestStatus(requestId, newStatus, userId) {
                 request.status = 'rejected';
                 request.reviewedAt = new Date();
                 await request.save({ session });
+                console.log(`✅ Request ID: ${requestId} status updated to rejected.`);
 
                 // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
@@ -279,6 +287,8 @@ async function updateRequestStatus(requestId, newStatus, userId) {
 // Message Handlers
 async function handleTextMessage(chatId, userId, text, userInfo) {
     try {
+        console.log(`Handling text message from user ${userId}: "${text}"`);
+
         // Admin commands
         if (userId.toString() === ADMIN_USER_ID) {
             if (text === '/review') {
@@ -318,6 +328,7 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
 }
 
 async function processUserCommand(chatId, userId, text, userInfo) {
+    console.log(`Processing user command: ${text}`);
     if (text === '/start') {
         await clearUserSession(userId);
         const welcomeText = `🌹 أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
@@ -358,6 +369,7 @@ async function processUserCommand(chatId, userId, text, userInfo) {
 }
 
 async function startUploadProcess(chatId, userId, userInfo) {
+    console.log(`Starting upload process for user ${userId}.`);
     const sessionData = {
         state: STATES.WAITING_FIRST_NAME,
         data: {},
@@ -397,6 +409,7 @@ async function showHelp(chatId) {
 
 async function handleUserInput(chatId, userId, text) {
     const session = await getUserSession(userId);
+    console.log(`User ${userId} input: "${text}" with session state: ${session.state}`);
 
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
@@ -504,6 +517,7 @@ async function handleUserInput(chatId, userId, text) {
 }
 
 async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
+    console.log(`Handling photo message from user ${userId}.`);
     const session = await getUserSession(userId);
 
     if (session.state !== STATES.WAITING_PHOTO) {
@@ -523,6 +537,7 @@ async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
 }
 
 async function completeRequest(chatId, userId, session) {
+    console.log(`Completing request for user ${userId}.`);
     const martyrData = session.data;
     const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`;
 
@@ -590,6 +605,7 @@ async function showUserRequests(chatId, userId) {
         const requests = await Request.find({ userId: userId.toString() })
             .sort({ createdAt: -1 })
             .limit(10);
+        console.log(`Found ${requests.length} requests for user ${userId}.`);
 
         if (!requests.length) {
             await sendTelegramMessage(chatId, {
@@ -643,6 +659,7 @@ async function reviewPendingRequests(chatId) {
             .sort({ createdAt: -1 })
             .limit(5);
 
+        console.log(`Found ${requests.length} pending requests to review.`);
         if (!requests.length) {
             await sendTelegramMessage(chatId, {
                 text: "لا توجد طلبات معلقة للمراجعة في الوقت الحالي."
@@ -728,6 +745,7 @@ async function rejectRequest(chatId, requestId, userIdReq) {
 
 async function handleCallbackQuery(chatId, callbackData) {
     try {
+        console.log(`Handling callback query: ${callbackData}`);
         const parts = callbackData.split('_');
         if (parts.length < 3) {
             await sendTelegramMessage(chatId, {
