@@ -1,8 +1,9 @@
-// api/webhook.js - Vercel Serverless Function for User Bot
+// netlify/functions/webhook.js - Netlify Serverless Function for User Bot
 const mongoose = require('mongoose');
 const axios = require('axios');
 
 // Configuration
+// Use environment variables from Netlify, with fallback values for local development
 const BOT_TOKEN = process.env.BOT_TOKEN || '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '7b98d38c418169cf635290b4a31f8e95';
@@ -12,7 +13,7 @@ const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 // Global connection variable for reuse
 let cachedConnection = null;
 
-// MongoDB Connection with caching for Vercel
+// MongoDB Connection with caching
 async function connectToDatabase() {
     if (cachedConnection) {
         console.log('Using cached MongoDB connection.');
@@ -578,72 +579,63 @@ async function completeRequest(chatId, userId, session) {
 }
 
 // Main handler
-module.exports = async (req, res) => {
-    if (req.method === 'POST') {
-        try {
-            const update = req.body;
-            console.log('Received update from Telegram');
+exports.handler = async (event, context) => {
+    // Get headers from the event object
+    const headers = event.headers;
 
-            if (update.message) {
-                const message = update.message;
-                const chatId = message.chat.id;
-                const userId = message.from.id.toString();
+    // Check for POST method
+    if (event.httpMethod !== 'POST') {
+        return {
+            statusCode: 405,
+            body: JSON.stringify({ status: 'error', message: 'Method Not Allowed' }),
+        };
+    }
 
-                const userInfo = {
-                    telegram_id: userId,
-                    first_name: message.from.first_name || '',
-                    last_name: message.from.last_name || '',
-                    username: message.from.username || ''
-                };
+    try {
+        const update = JSON.parse(event.body);
+        console.log('Received update from Telegram');
 
-                await connectToDatabase();
+        if (update.message) {
+            const message = update.message;
+            const chatId = message.chat.id;
+            const userId = message.from.id.toString();
 
-                if (message.text) {
-                    await handleTextMessage(chatId, userId, message.text, userInfo);
-                } else if (message.photo) {
-                    const caption = message.caption || '';
-                    await handlePhotoMessage(chatId, userId, message.photo, caption);
-                } else {
-                    await sendTelegramMessage(chatId, {
-                        text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
-                    });
-                }
-            } else { // No callback queries for user bot
-                console.log('Received unsupported update type.');
+            const userInfo = {
+                telegram_id: userId,
+                first_name: message.from.first_name || '',
+                last_name: message.from.last_name || '',
+                username: message.from.username || ''
+            };
+
+            await connectToDatabase();
+
+            if (message.text) {
+                await handleTextMessage(chatId, userId, message.text, userInfo);
+            } else if (message.photo) {
+                const caption = message.caption || '';
+                await handlePhotoMessage(chatId, userId, message.photo, caption);
+            } else {
+                await sendTelegramMessage(chatId, {
+                    text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
+                });
             }
+        } else {
+            console.log('Received unsupported update type.');
+        }
 
-            return res.status(200).json({ status: 'ok' });
-
-        } catch (error) {
-            console.error('Error processing webhook:', error);
-            return res.status(200).json({
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ status: 'ok' }),
+        };
+    } catch (error) {
+        console.error('Error processing webhook:', error);
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
                 status: 'error',
                 message: 'Internal error occurred',
                 error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
-            });
-        }
+            }),
+        };
     }
-
-    if (req.method === 'GET' || req.method === 'OPTIONS') {
-        try {
-            await connectToDatabase();
-            return res.status(200).json({
-                "status": "ok",
-                "message": "Syrian Martyrs Bot is running!",
-                "mongodb_status": "connected",
-                "platform": "Vercel Serverless"
-            });
-        } catch (error) {
-            return res.status(500).json({
-                "status": "error",
-                "message": "Bot is not connected to MongoDB.",
-                "error": error.message
-            });
-        }
-    }
-
-    return res.status(405).json({
-        status: 'error',
-        message: 'Method not allowed'
-    });
 };
