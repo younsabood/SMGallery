@@ -21,9 +21,9 @@
     }
   },
   "env": {
-    "BOT_TOKEN": "@bot_token",
-    "ADMIN_USER_ID": "@admin_user_id",
-    "MONGODB_URI": "@mongodb_uri",
+    "BOT_TOKEN": "BOT_TOKEN",
+    "ADMIN_USER_ID": "ADMIN_USER_ID",
+    "MONGODB_URI": "MONGODB_URI",
     "NODE_ENV": "production"
   }
 }
