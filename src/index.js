@@ -41,6 +41,9 @@ const KV_KEYS = {
     // System statistics
     SYSTEM_STATS: () => `system_stats`,
     
+    // Operations Log - سجل العمليات
+    OPERATIONS_LOG: () => `operations_log`
+    
     // Admin sessions
     ADMIN_SESSION: (userId) => `admin_session:${userId}`,
 };
@@ -121,6 +124,9 @@ class RequestManager {
             if (!pendingList.includes(requestId)) {
                 pendingList.push(requestId);
                 await env.BOT_DATA.put(KV_KEYS.PENDING_REQUESTS(), JSON.stringify(pendingList));
+                console.log(`Request ${requestId} added to pending list. Total pending: ${pendingList.length}`);
+            } else {
+                console.log(`Request ${requestId} already in pending list`);
             }
             return true;
         } catch (error) {
@@ -332,9 +338,14 @@ async function saveRequest(userId, requestData, env) {
         };
         
         await env.BOT_DATA.put(requestKey, JSON.stringify(fullRequestData));
+        console.log(`Request saved with ID: ${requestId}`);
 
-        // Add to pending list
-        await RequestManager.addToPendingList(requestId, env);
+        // Add to pending list - هذا مهم جداً
+        const addedToPending = await RequestManager.addToPendingList(requestId, env);
+        if (!addedToPending) {
+            console.error(`Failed to add ${requestId} to pending list`);
+            return null;
+        }
 
         // Update user's request list
         let userRequests = await env.BOT_DATA.get(userRequestsKey, 'json');
@@ -343,12 +354,38 @@ async function saveRequest(userId, requestData, env) {
         }
         userRequests.push(requestId);
         await env.BOT_DATA.put(userRequestsKey, JSON.stringify(userRequests));
+        console.log(`Added request ${requestId} to user ${userId} requests list`);
 
         // Update statistics
         await SystemStats.increment(env, 'totalRequests');
         await SystemStats.increment(env, 'pendingRequests');
+        console.log(`Statistics updated for new request ${requestId}`);
 
-        console.log(`Request saved: ${requestId}`);
+        // Log the operation
+        const logString = await env.BOT_DATA.get(KV_KEYS.OPERATIONS_LOG());
+        let logs = logString ? JSON.parse(logString) : [];
+        
+        const logEntry = {
+            id: Date.now().toString(),
+            type: 'request_created',
+            data: {
+                requestId: requestId,
+                martyrName: requestData.martyrData.full_name || 'غير محدد',
+                userId: userId,
+                martyrData: requestData.martyrData
+            },
+            timestamp: new Date().toISOString(),
+            dateString: new Date().toLocaleString('ar-EG')
+        };
+
+        logs.unshift(logEntry);
+        if (logs.length > 500) {
+            logs = logs.slice(0, 500);
+        }
+
+        await env.BOT_DATA.put(KV_KEYS.OPERATIONS_LOG(), JSON.stringify(logs));
+        console.log(`Operation logged for request ${requestId}`);
+
         return requestId;
     } catch (error) {
         console.error(`Error saving request: ${requestId}`, error.message);
