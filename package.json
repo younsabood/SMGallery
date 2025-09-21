@@ -5,7 +5,6 @@
   "main": "api/webhook.js",
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo 'Build completed'",
     "start": "vercel --prod"
   },
   "keywords": [
