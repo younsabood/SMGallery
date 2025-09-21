@@ -1,4 +1,4 @@
-// src/index.js - Cloudflare Worker for Syrian Martyrs Bot
+// src/index.js - Cloudflare Worker for Syrian Martyrs Bot (Updated)
 
 // States
 const STATES = {
@@ -13,6 +13,38 @@ const STATES = {
     WAITING_PHOTO: 'waiting_photo'
 };
 
+// Status Types
+const REQUEST_STATUS = {
+    PENDING: 'pending',
+    APPROVED: 'approved',
+    REJECTED: 'rejected'
+};
+
+// KV Keys Schema - مفاتيح قاعدة البيانات المشتركة
+const KV_KEYS = {
+    // User sessions
+    SESSION: (userId) => `session:${userId}`,
+    
+    // Requests by status
+    PENDING_REQUESTS: () => `requests:pending`,
+    APPROVED_REQUESTS: () => `requests:approved`,
+    
+    // Individual request data
+    REQUEST: (requestId) => `request:${requestId}`,
+    
+    // User's request IDs
+    USER_REQUESTS: (userId) => `user_requests:${userId}`,
+    
+    // Martyrs database
+    MARTYRS: () => `martyrs`,
+    
+    // System statistics
+    SYSTEM_STATS: () => `system_stats`,
+    
+    // Admin sessions
+    ADMIN_SESSION: (userId) => `admin_session:${userId}`,
+};
+
 // Utility Functions
 function generateRequestId() {
     return Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -24,6 +56,128 @@ function getKeyboard(buttons) {
         resize_keyboard: true,
         one_time_keyboard: false
     };
+}
+
+// System Statistics Manager
+class SystemStats {
+    static async get(env) {
+        try {
+            const statsString = await env.BOT_DATA.get(KV_KEYS.SYSTEM_STATS());
+            return statsString ? JSON.parse(statsString) : {
+                totalRequests: 0,
+                pendingRequests: 0,
+                approvedRequests: 0,
+                rejectedRequests: 0,
+                totalMartyrs: 0,
+                lastUpdated: new Date().toISOString()
+            };
+        } catch (error) {
+            console.error('Error getting system stats:', error);
+            return null;
+        }
+    }
+
+    static async update(env, changes) {
+        try {
+            const stats = await this.get(env);
+            if (!stats) return false;
+
+            // Apply changes
+            Object.keys(changes).forEach(key => {
+                if (key in stats) {
+                    stats[key] += changes[key];
+                    if (stats[key] < 0) stats[key] = 0; // Prevent negative values
+                }
+            });
+
+            stats.lastUpdated = new Date().toISOString();
+            await env.BOT_DATA.put(KV_KEYS.SYSTEM_STATS(), JSON.stringify(stats));
+            console.log('System stats updated:', changes);
+            return true;
+        } catch (error) {
+            console.error('Error updating system stats:', error);
+            return false;
+        }
+    }
+
+    static async increment(env, field, amount = 1) {
+        const changes = { [field]: amount };
+        return await this.update(env, changes);
+    }
+
+    static async decrement(env, field, amount = 1) {
+        const changes = { [field]: -amount };
+        return await this.update(env, changes);
+    }
+}
+
+// Request Manager
+class RequestManager {
+    static async addToPendingList(requestId, env) {
+        try {
+            const pendingString = await env.BOT_DATA.get(KV_KEYS.PENDING_REQUESTS());
+            let pendingList = pendingString ? JSON.parse(pendingString) : [];
+            
+            if (!pendingList.includes(requestId)) {
+                pendingList.push(requestId);
+                await env.BOT_DATA.put(KV_KEYS.PENDING_REQUESTS(), JSON.stringify(pendingList));
+            }
+            return true;
+        } catch (error) {
+            console.error('Error adding to pending list:', error);
+            return false;
+        }
+    }
+
+    static async removeFromPendingList(requestId, env) {
+        try {
+            const pendingString = await env.BOT_DATA.get(KV_KEYS.PENDING_REQUESTS());
+            let pendingList = pendingString ? JSON.parse(pendingString) : [];
+            
+            pendingList = pendingList.filter(id => id !== requestId);
+            await env.BOT_DATA.put(KV_KEYS.PENDING_REQUESTS(), JSON.stringify(pendingList));
+            return true;
+        } catch (error) {
+            console.error('Error removing from pending list:', error);
+            return false;
+        }
+    }
+
+    static async addToApprovedList(requestId, env) {
+        try {
+            const approvedString = await env.BOT_DATA.get(KV_KEYS.APPROVED_REQUESTS());
+            let approvedList = approvedString ? JSON.parse(approvedString) : [];
+            
+            if (!approvedList.includes(requestId)) {
+                approvedList.push(requestId);
+                await env.BOT_DATA.put(KV_KEYS.APPROVED_REQUESTS(), JSON.stringify(approvedList));
+            }
+            return true;
+        } catch (error) {
+            console.error('Error adding to approved list:', error);
+            return false;
+        }
+    }
+
+    static async getPendingRequests(env) {
+        try {
+            const pendingString = await env.BOT_DATA.get(KV_KEYS.PENDING_REQUESTS());
+            return pendingString ? JSON.parse(pendingString) : [];
+        } catch (error) {
+            console.error('Error getting pending requests:', error);
+            return [];
+        }
+    }
+
+    static async getRequestData(requestId, env) {
+        try {
+            const requestString = await env.BOT_DATA.get(KV_KEYS.REQUEST(requestId));
+            return requestString ? JSON.parse(requestString) : null;
+        } catch (error) {
+            console.error('Error getting request data:', error);
+            return null;
+        }
+    }
 }
 
 // Telegram API interactions
@@ -122,13 +276,7 @@ async function uploadPhotoToImgbb(fileId, env) {
     }
 }
 
-// KV Functions
-const KV_KEYS = {
-    SESSION: (userId) => `session:${userId}`,
-    REQUEST: (requestId) => `request:${requestId}`,
-    USER_REQUESTS: (userId) => `user_requests:${userId}`,
-};
-
+// Session Management
 async function saveUserSession(userId, sessionData, env) {
     try {
         const sessionString = JSON.stringify(sessionData);
@@ -152,7 +300,7 @@ async function getUserSession(userId, env) {
     } catch (error) {
         console.error(`Error retrieving session for user ${userId}:`, error.message);
     }
-    console.log(`No session or error retrieving session found for user ${userId}.`);
+    console.log(`No session found for user ${userId}.`);
     return { state: STATES.IDLE, data: {} };
 }
 
@@ -167,6 +315,7 @@ async function clearUserSession(userId, env) {
     }
 }
 
+// Request Management
 async function saveRequest(userId, requestData, env) {
     const requestId = generateRequestId();
     const requestKey = KV_KEYS.REQUEST(requestId);
@@ -174,23 +323,30 @@ async function saveRequest(userId, requestData, env) {
     
     try {
         // Save the request itself
-        const requestString = JSON.stringify({
+        const fullRequestData = {
             ...requestData,
             userId: userId,
             requestId: requestId,
+            status: REQUEST_STATUS.PENDING,
             createdAt: new Date().toISOString()
-        });
-        await env.BOT_DATA.put(requestKey, requestString);
+        };
+        
+        await env.BOT_DATA.put(requestKey, JSON.stringify(fullRequestData));
 
-        // Get the current list of requests for the user
+        // Add to pending list
+        await RequestManager.addToPendingList(requestId, env);
+
+        // Update user's request list
         let userRequests = await env.BOT_DATA.get(userRequestsKey, 'json');
         if (!userRequests) {
             userRequests = [];
         }
-        
-        // Add the new request ID and save the list
         userRequests.push(requestId);
         await env.BOT_DATA.put(userRequestsKey, JSON.stringify(userRequests));
+
+        // Update statistics
+        await SystemStats.increment(env, 'totalRequests');
+        await SystemStats.increment(env, 'pendingRequests');
 
         console.log(`Request saved: ${requestId}`);
         return requestId;
@@ -212,11 +368,7 @@ async function showUserRequests(chatId, userId, env) {
         }
 
         const requests = await Promise.all(requestsIds.map(async (reqId) => {
-            const reqString = await env.BOT_DATA.get(KV_KEYS.REQUEST(reqId));
-            if (reqString) {
-                return JSON.parse(reqString);
-            }
-            return null;
+            return await RequestManager.getRequestData(reqId, env);
         }));
         
         const validRequests = requests.filter(req => req !== null);
@@ -238,7 +390,7 @@ async function showUserRequests(chatId, userId, env) {
             const createdAt = new Date(req.createdAt).toISOString().substring(0, 10);
 
             const statusEmoji = {
-                'pending': '⏳',
+                'pending': '⳹',
                 'approved': '✅',
                 'rejected': '❌'
             }[status] || '❓';
@@ -525,8 +677,7 @@ async function completeRequest(chatId, userId, session, env) {
             place: martyrData.place || '',
             imageUrl: imgbbUrl,
         },
-        userInfo: session.userInfo,
-        status: 'pending'
+        userInfo: session.userInfo
     };
 
     const requestId = await saveRequest(userId, requestData, env);
@@ -569,61 +720,4 @@ async function completeRequest(chatId, userId, session, env) {
 
 // Main handler
 async function handleRequest(request, env) {
-    if (request.method === 'POST') {
-        try {
-            const update = await request.json();
-            console.log('Received update from Telegram');
-
-            if (update.message) {
-                const message = update.message;
-                const chatId = message.chat.id;
-                const userId = message.from.id.toString();
-
-                const userInfo = {
-                    telegram_id: userId,
-                    first_name: message.from.first_name || '',
-                    last_name: message.from.last_name || '',
-                    username: message.from.username || ''
-                };
-
-                if (message.text) {
-                    await handleTextMessage(chatId, userId, message.text, userInfo, env);
-                } else if (message.photo) {
-                    const caption = message.caption || '';
-                    await handlePhotoMessage(chatId, userId, message.photo, caption, env);
-                } else {
-                    await sendTelegramMessage(chatId, {
-                        text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
-                    }, env);
-                }
-            } else {
-                console.log('Received unsupported update type.');
-            }
-
-            return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
-
-        } catch (error) {
-            console.error('Error processing webhook:', error);
-            return new Response(JSON.stringify({
-                status: 'error',
-                message: 'Internal error occurred',
-                error: error.message
-            }), { status: 500 });
-        }
-    } else if (request.method === 'GET') {
-        return new Response(JSON.stringify({
-            "status": "ok",
-            "message": "Syrian Martyrs Bot is running on Cloudflare Workers!",
-            "platform": "Cloudflare Workers"
-        }), { status: 200 });
-    }
-
-    return new Response(JSON.stringify({ status: 'error', message: 'Method Not Allowed' }), { status: 405 });
-}
-
-// Export the handler for Cloudflare Workers
-export default {
-    async fetch(request, env, ctx) {
-        return handleRequest(request, env);
-    },
-};
+    if (request.method === 'POST
