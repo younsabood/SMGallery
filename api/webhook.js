@@ -6,7 +6,9 @@ const axios = require('axios');
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
-const MONGODB_URI = process.env.MONGODB_URI;
+
+// Directly use the connection string with the password
+const MONGODB_URI = 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
 
 // Global connection variable for reuse
 let cachedConnection = null;
