@@ -29,7 +29,7 @@ function getKeyboard(buttons) {
 // Telegram API interactions
 async function sendTelegramMessage(chatId, options = {}, env) {
     const { text, replyMarkup, photoId, photoCaption } = options;
-    const BOT_TOKEN = env.BOT_TOKEN; // Get from environment variables
+    const BOT_TOKEN = env.BOT_TOKEN;
     const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
     let url = TELEGRAM_API_URL;
@@ -50,7 +50,7 @@ async function sendTelegramMessage(chatId, options = {}, env) {
     }
 
     if (replyMarkup) {
-        payload.reply_markup = replyMarkup; // replyMarkup is already JSON object
+        payload.reply_markup = replyMarkup;
     }
 
     try {
@@ -77,8 +77,13 @@ async function getTelegramPhotoUrl(fileId, env) {
     try {
         const response = await fetch(`${TELEGRAM_API_URL}getFile?file_id=${fileId}`);
         const data = await response.json();
-        const filePath = data.result.file_path;
-        return `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+        if (data.ok && data.result && data.result.file_path) {
+            const filePath = data.result.file_path;
+            return `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+        } else {
+            console.error('Telegram API getFile failed:', data.description);
+            return null;
+        }
     } catch (error) {
         console.error('Error getting Telegram file path:', error.message);
         return null;
@@ -86,7 +91,7 @@ async function getTelegramPhotoUrl(fileId, env) {
 }
 
 async function uploadPhotoToImgbb(fileId, env) {
-    const IMGBB_API_KEY = env.IMGBB_API_KEY; // Get from environment variables
+    const IMGBB_API_KEY = env.IMGBB_API_KEY;
     try {
         const fileUrl = await getTelegramPhotoUrl(fileId, env);
         if (!fileUrl) {
@@ -125,58 +130,79 @@ const KV_KEYS = {
 };
 
 async function saveUserSession(userId, sessionData, env) {
-    const sessionString = JSON.stringify(sessionData);
-    await env.BOT_DATA.put(KV_KEYS.SESSION(userId), sessionString);
-    console.log(`Session saved for user ${userId}.`);
-    return true;
+    try {
+        const sessionString = JSON.stringify(sessionData);
+        await env.BOT_DATA.put(KV_KEYS.SESSION(userId), sessionString);
+        console.log(`Session saved for user ${userId}.`);
+        return true;
+    } catch (error) {
+        console.error(`Error saving session for user ${userId}:`, error.message);
+        return false;
+    }
 }
 
 async function getUserSession(userId, env) {
-    const sessionString = await env.BOT_DATA.get(KV_KEYS.SESSION(userId));
-    if (sessionString) {
-        const session = JSON.parse(sessionString);
-        console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
-        return session;
+    try {
+        const sessionString = await env.BOT_DATA.get(KV_KEYS.SESSION(userId));
+        if (sessionString) {
+            const session = JSON.parse(sessionString);
+            console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
+            return session;
+        }
+    } catch (error) {
+        console.error(`Error retrieving session for user ${userId}:`, error.message);
     }
-    console.log(`No session found for user ${userId}.`);
+    console.log(`No session or error retrieving session found for user ${userId}.`);
     return { state: STATES.IDLE, data: {} };
 }
 
 async function clearUserSession(userId, env) {
-    await env.BOT_DATA.delete(KV_KEYS.SESSION(userId));
-    console.log(`Session cleared for user ${userId}.`);
-    return true;
+    try {
+        await env.BOT_DATA.delete(KV_KEYS.SESSION(userId));
+        console.log(`Session cleared for user ${userId}.`);
+        return true;
+    } catch (error) {
+        console.error(`Error clearing session for user ${userId}:`, error.message);
+        return false;
+    }
 }
 
 async function saveRequest(userId, requestData, env) {
     const requestId = generateRequestId();
+    const requestKey = KV_KEYS.REQUEST(requestId);
+    const userRequestsKey = KV_KEYS.USER_REQUESTS(userId);
     
-    // Save the request itself
-    const requestString = JSON.stringify({
-        ...requestData,
-        userId: userId,
-        requestId: requestId,
-        createdAt: new Date().toISOString()
-    });
-    await env.BOT_DATA.put(KV_KEYS.REQUEST(requestId), requestString);
+    try {
+        // Save the request itself
+        const requestString = JSON.stringify({
+            ...requestData,
+            userId: userId,
+            requestId: requestId,
+            createdAt: new Date().toISOString()
+        });
+        await env.BOT_DATA.put(requestKey, requestString);
 
-    // Get the current list of requests for the user
-    let userRequests = await env.BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
-    if (!userRequests) {
-        userRequests = [];
+        // Get the current list of requests for the user
+        let userRequests = await env.BOT_DATA.get(userRequestsKey, 'json');
+        if (!userRequests) {
+            userRequests = [];
+        }
+        
+        // Add the new request ID and save the list
+        userRequests.push(requestId);
+        await env.BOT_DATA.put(userRequestsKey, JSON.stringify(userRequests));
+
+        console.log(`Request saved: ${requestId}`);
+        return requestId;
+    } catch (error) {
+        console.error(`Error saving request: ${requestId}`, error.message);
+        return null;
     }
-    
-    // Add the new request ID and save the list
-    userRequests.push(requestId);
-    await env.BOT_DATA.put(KV_KEYS.USER_REQUESTS(userId), JSON.stringify(userRequests));
-
-    console.log(`Request saved: ${requestId}`);
-    return requestId;
 }
 
 async function showUserRequests(chatId, userId, env) {
     try {
-        let requestsIds = await env.BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
+        const requestsIds = await env.BOT_DATA.get(KV_KEYS.USER_REQUESTS(userId), 'json');
         if (!requestsIds || !requestsIds.length) {
             await sendTelegramMessage(chatId, {
                 text: "لا توجد طلبات مقدمة من قبلك حتى الآن",
@@ -185,21 +211,28 @@ async function showUserRequests(chatId, userId, env) {
             return;
         }
 
-        // Fetch each request using its ID from the list
-        const requests = [];
-        for (const reqId of requestsIds) {
+        const requests = await Promise.all(requestsIds.map(async (reqId) => {
             const reqString = await env.BOT_DATA.get(KV_KEYS.REQUEST(reqId));
             if (reqString) {
-                requests.push(JSON.parse(reqString));
+                return JSON.parse(reqString);
             }
-        }
+            return null;
+        }));
         
-        // Sort the requests
-        requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const validRequests = requests.filter(req => req !== null);
+        if (validRequests.length === 0) {
+            await sendTelegramMessage(chatId, {
+                text: "لا توجد طلبات صالحة مقدمة من قبلك حتى الآن",
+                replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+            }, env);
+            return;
+        }
+
+        validRequests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
         let requestsText = "<b>طلباتك المقدمة:</b>\n\n";
 
-        for (const req of requests) {
+        for (const req of validRequests) {
             const martyrName = req.martyrData.full_name || 'غير محدد';
             const status = req.status;
             const createdAt = new Date(req.createdAt).toISOString().substring(0, 10);
@@ -297,7 +330,8 @@ async function startUploadProcess(chatId, userId, userInfo, env) {
         createdAt: new Date().toISOString()
     };
 
-    if (await saveUserSession(userId, sessionData, env)) {
+    const isSessionSaved = await saveUserSession(userId, sessionData, env);
+    if (isSessionSaved) {
         await sendTelegramMessage(chatId, {
             text: "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:",
             replyMarkup: getKeyboard(['إلغاء'])
@@ -340,100 +374,102 @@ async function handleUserInput(chatId, userId, text, env) {
     }
 
     const currentState = session.state;
+    const sessionData = session.data;
 
-    if (currentState === STATES.WAITING_FIRST_NAME) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال الاسم الأول" }, env);
-            return;
-        }
-        session.data.first_name = text.trim();
-        session.state = STATES.WAITING_FATHER_NAME;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال اسم الأب:",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+    switch (currentState) {
+        case STATES.WAITING_FIRST_NAME:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال الاسم الأول" }, env);
+                return;
+            }
+            sessionData.first_name = text.trim();
+            session.state = STATES.WAITING_FATHER_NAME;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال اسم الأب:",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-    } else if (currentState === STATES.WAITING_FATHER_NAME) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم الأب" }, env);
-            return;
-        }
-        session.data.father_name = text.trim();
-        session.state = STATES.WAITING_FAMILY_NAME;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال اسم العائلة:",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+        case STATES.WAITING_FATHER_NAME:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم الأب" }, env);
+                return;
+            }
+            sessionData.father_name = text.trim();
+            session.state = STATES.WAITING_FAMILY_NAME;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال اسم العائلة:",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-    } else if (currentState === STATES.WAITING_FAMILY_NAME) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم العائلة" }, env);
-            return;
-        }
-        session.data.family_name = text.trim();
-        session.state = STATES.WAITING_AGE;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال عمر الشهيد:",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+        case STATES.WAITING_FAMILY_NAME:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال اسم العائلة" }, env);
+                return;
+            }
+            sessionData.family_name = text.trim();
+            session.state = STATES.WAITING_AGE;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال عمر الشهيد:",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-    } else if (currentState === STATES.WAITING_AGE) {
-        const age = parseInt(text);
-        if (isNaN(age) || age < 0 || age > 150) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال عمر صحيح (0-150)" }, env);
-            return;
-        }
+        case STATES.WAITING_AGE:
+            const age = parseInt(text);
+            if (isNaN(age) || age < 0 || age > 150) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال عمر صحيح (0-150)" }, env);
+                return;
+            }
+            sessionData.age = age;
+            session.state = STATES.WAITING_BIRTH_DATE;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-        session.data.age = age;
-        session.state = STATES.WAITING_BIRTH_DATE;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15):",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+        case STATES.WAITING_BIRTH_DATE:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الولادة" }, env);
+                return;
+            }
+            sessionData.birth_date = text.trim();
+            session.state = STATES.WAITING_MARTYRDOM_DATE;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-    } else if (currentState === STATES.WAITING_BIRTH_DATE) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الولادة" }, env);
-            return;
-        }
-        session.data.birth_date = text.trim();
-        session.state = STATES.WAITING_MARTYRDOM_DATE;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15):",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+        case STATES.WAITING_MARTYRDOM_DATE:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الاستشهاد" }, env);
+                return;
+            }
+            sessionData.martyrdom_date = text.trim();
+            session.state = STATES.WAITING_PLACE;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إدخال مكان الاستشهاد:",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
 
-    } else if (currentState === STATES.WAITING_MARTYRDOM_DATE) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال تاريخ الاستشهاد" }, env);
-            return;
-        }
-        session.data.martyrdom_date = text.trim();
-        session.state = STATES.WAITING_PLACE;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إدخال مكان الاستشهاد:",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
-
-    } else if (currentState === STATES.WAITING_PLACE) {
-        if (!text.trim()) {
-            await sendTelegramMessage(chatId, { text: "الرجاء إدخال مكان الاستشهاد" }, env);
-            return;
-        }
-        session.data.place = text.trim();
-        session.state = STATES.WAITING_PHOTO;
-        await saveUserSession(userId, session, env);
-        await sendTelegramMessage(chatId, {
-            text: "الرجاء إرسال صورة الشهيد:\n\nيمكنك إضافة تعليق على الصورة إذا رغبت",
-            replyMarkup: getKeyboard(['إلغاء'])
-        }, env);
+        case STATES.WAITING_PLACE:
+            if (!text.trim()) {
+                await sendTelegramMessage(chatId, { text: "الرجاء إدخال مكان الاستشهاد" }, env);
+                return;
+            }
+            sessionData.place = text.trim();
+            session.state = STATES.WAITING_PHOTO;
+            await sendTelegramMessage(chatId, {
+                text: "الرجاء إرسال صورة الشهيد:\n\nيمكنك إضافة تعليق على الصورة إذا رغبت",
+                replyMarkup: getKeyboard(['إلغاء'])
+            }, env);
+            break;
     }
+    await saveUserSession(userId, session, env);
 }
 
 async function handlePhotoMessage(chatId, userId, photoData, caption = '', env) {
@@ -463,6 +499,9 @@ async function completeRequest(chatId, userId, session, env) {
 
     let imgbbUrl = null;
     if (martyrData.photo_file_id) {
+        await sendTelegramMessage(chatId, {
+            text: "جاري تحميل الصورة، يرجى الانتظار...",
+        }, env);
         imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
     }
     
@@ -520,7 +559,6 @@ async function completeRequest(chatId, userId, session, env) {
                 replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
             }, env);
         }
-
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
