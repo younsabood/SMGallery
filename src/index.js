@@ -129,12 +129,19 @@ async function uploadPhotoToImgbb(fileId, env) {
     }
 }
 
-// Session Management (still using KV as D1 is not ideal for transient session data)
+// Session Management with D1
 async function saveUserSession(userId, sessionData, env) {
     try {
-        const sessionString = JSON.stringify(sessionData);
-        await env.BOT_DATA.put(`session:${userId}`, sessionString);
-        console.log(`Session saved for user ${userId}.`);
+        await env.DB.prepare(
+            'INSERT OR REPLACE INTO sessions (user_id, state, data, userInfo, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).bind(
+            userId,
+            sessionData.state,
+            JSON.stringify(sessionData.data),
+            JSON.stringify(sessionData.userInfo),
+            new Date().toISOString()
+        ).run();
+        console.log(`Session saved for user ${userId} using D1.`);
         return true;
     } catch (error) {
         console.error(`Error saving session for user ${userId}:`, error.message);
@@ -144,11 +151,15 @@ async function saveUserSession(userId, sessionData, env) {
 
 async function getUserSession(userId, env) {
     try {
-        const sessionString = await env.BOT_DATA.get(`session:${userId}`);
-        if (sessionString) {
-            const session = JSON.parse(sessionString);
+        const session = await env.DB.prepare('SELECT * FROM sessions WHERE user_id = ?').bind(userId).first();
+        if (session) {
             console.log(`Session retrieved for user ${userId}. State: ${session.state}`);
-            return session;
+            return {
+                state: session.state,
+                data: JSON.parse(session.data),
+                userInfo: JSON.parse(session.userInfo),
+                createdAt: session.created_at
+            };
         }
     } catch (error) {
         console.error(`Error retrieving session for user ${userId}:`, error.message);
@@ -159,8 +170,8 @@ async function getUserSession(userId, env) {
 
 async function clearUserSession(userId, env) {
     try {
-        await env.BOT_DATA.delete(`session:${userId}`);
-        console.log(`Session cleared for user ${userId}.`);
+        await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+        console.log(`Session cleared for user ${userId} from D1.`);
         return true;
     } catch (error) {
         console.error(`Error clearing session for user ${userId}:`, error.message);
