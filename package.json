@@ -1,0 +1,22 @@
+{
+  "name": "syrian-martyrs-bot",
+  "version": "1.0.0",
+  "description": "Telegram Bot for Syrian Martyrs Gallery with MongoDB",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "keywords": ["telegram", "bot", "nodejs", "mongodb"],
+  "author": "DevYouns",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.6.3",
+    "axios": "^1.5.1",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
