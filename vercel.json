@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "name": "syrian-martyrs-bot",
+  "builds": [
+    {
+      "src": "api/webhook.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/webhook",
+      "dest": "/api/webhook"
+    },
+    {
+      "src": "/",
+      "dest": "/api/webhook"
+    },
+    {
+      "src": "/health",
+      "dest": "/api/webhook"
+    }
+  ],
+  "functions": {
+    "api/webhook.js": {
+      "maxDuration": 30
+    }
+  },
+  "env": {
+    "BOT_TOKEN": "@bot_token",
+    "ADMIN_USER_ID": "@admin_user_id", 
+    "MONGODB_URI": "@mongodb_uri",
+    "NODE_ENV": "production"
+  }
+}

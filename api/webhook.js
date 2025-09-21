@@ -1,66 +1,41 @@
-// app.js - Optimized for Render.com
-const express = require('express');
+// api/webhook.js - Vercel Serverless Function
 const mongoose = require('mongoose');
 const axios = require('axios');
-require('dotenv').config();
 
-const app = express();
-
-// Middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Add request logging for debugging
-app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-    next();
-});
-
-// Configuration with better defaults for Render
-const BOT_TOKEN = process.env.BOT_TOKEN || "8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM";
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "5679396406";
+// Configuration
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/syrian_martyrs?retryWrites=true&w=majority&appName=Younss";
-const PORT = process.env.PORT || 10000; // Render uses port 10000
+const MONGODB_URI = process.env.MONGODB_URI;
 
-console.log(`🚀 Starting Syrian Martyrs Bot...`);
-console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`🔑 Admin ID: ${ADMIN_USER_ID}`);
-console.log(`🌐 Port: ${PORT}`);
+// Global connection variable for reuse
+let cachedConnection = null;
 
-// MongoDB Connection with better options for Render
-const mongoOptions = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    maxPoolSize: 10, // Maintain up to 10 socket connections
-    serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
-    socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-    bufferMaxEntries: 0, // Disable mongoose buffering
-    bufferCommands: false, // Disable mongoose buffering
-};
+// MongoDB Connection with caching for Vercel
+async function connectToDatabase() {
+    if (cachedConnection) {
+        return cachedConnection;
+    }
 
-mongoose.connect(MONGODB_URI, mongoOptions)
-    .then(() => {
+    try {
+        const connection = await mongoose.connect(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            maxPoolSize: 5, // Limit pool size for serverless
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            bufferMaxEntries: 0,
+            bufferCommands: false,
+        });
+
+        cachedConnection = connection;
         console.log('✅ Connected to MongoDB');
-        console.log(`📦 Database: ${mongoose.connection.name}`);
-    })
-    .catch(err => {
-        console.error('❌ MongoDB connection error:', err);
-        process.exit(1);
-    });
-
-// Handle MongoDB connection events
-mongoose.connection.on('error', (err) => {
-    console.error('❌ MongoDB error:', err);
-});
-
-mongoose.connection.on('disconnected', () => {
-    console.log('⚠️ MongoDB disconnected');
-});
-
-mongoose.connection.on('reconnected', () => {
-    console.log('✅ MongoDB reconnected');
-});
+        return connection;
+    } catch (error) {
+        console.error('❌ MongoDB connection error:', error);
+        throw error;
+    }
+}
 
 // Schemas
 const userSessionSchema = new mongoose.Schema({
@@ -68,7 +43,7 @@ const userSessionSchema = new mongoose.Schema({
     state: { type: String, default: 'idle' },
     data: { type: mongoose.Schema.Types.Mixed, default: {} },
     userInfo: { type: mongoose.Schema.Types.Mixed, default: {} },
-    createdAt: { type: Date, default: Date.now, expires: 3600 }, // Auto-delete after 1 hour
+    createdAt: { type: Date, default: Date.now, expires: 3600 },
     updatedAt: { type: Date, default: Date.now }
 });
 
@@ -100,14 +75,10 @@ const requestSchema = new mongoose.Schema({
     reviewedAt: { type: Date }
 });
 
-// Add indexes for better performance
-userSessionSchema.index({ updatedAt: 1 });
-requestSchema.index({ status: 1, createdAt: -1 });
-
-// Models
-const UserSession = mongoose.model('UserSession', userSessionSchema);
-const Martyr = mongoose.model('Martyr', martyrSchema);
-const Request = mongoose.model('Request', requestSchema);
+// Models with existence check for Vercel
+const UserSession = mongoose.models.UserSession || mongoose.model('UserSession', userSessionSchema);
+const Martyr = mongoose.models.Martyr || mongoose.model('Martyr', martyrSchema);
+const Request = mongoose.models.Request || mongoose.model('Request', requestSchema);
 
 // States
 const STATES = {
@@ -153,12 +124,10 @@ async function sendTelegramMessage(chatId, options = {}) {
     
     try {
         const response = await axios.post(url, payload, {
-            timeout: 10000, // 10 second timeout
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            timeout: 8000,
+            headers: { 'Content-Type': 'application/json' }
         });
-        console.log(`✅ Message sent successfully to chat ${chatId}`);
+        console.log(`✅ Message sent to chat ${chatId}`);
         return response.data;
     } catch (error) {
         console.error(`❌ Error sending message to chat ${chatId}:`, error.response?.data || error.message);
@@ -183,7 +152,7 @@ function getInlineKeyboard(buttons) {
     };
 }
 
-// Database Functions with better error handling
+// Database Functions
 async function saveUserSession(userId, sessionData) {
     try {
         const result = await UserSession.findOneAndUpdate(
@@ -247,7 +216,6 @@ async function updateRequestStatus(requestId, newStatus, userId) {
             }
 
             if (newStatus === 'approved') {
-                // Save to martyrs collection
                 const martyrData = new Martyr({
                     nameFirst: request.martyrData.name_first,
                     nameFather: request.martyrData.name_father,
@@ -262,31 +230,29 @@ async function updateRequestStatus(requestId, newStatus, userId) {
                 
                 await martyrData.save({ session });
                 
-                // Update request status
                 request.status = 'approved';
                 request.reviewedAt = new Date();
                 await request.save({ session });
                 
-                // Send notification to user
+                // Send notification to user (async)
                 const martyrName = request.martyrData.full_name || 'غير محدد';
-                setTimeout(async () => {
+                setImmediate(async () => {
                     await sendTelegramMessage(userId.toString(), {
                         text: `<b>🎉 تهانينا!</b>\n\nتم قبول طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nشكراً لك على مساهمتك في حفظ ذكرى شهدائنا الأبرار.`
                     });
-                }, 1000);
+                });
                 
             } else if (newStatus === 'rejected') {
                 request.status = 'rejected';
                 request.reviewedAt = new Date();
                 await request.save({ session });
                 
-                // Send notification to user
                 const martyrName = request.martyrData.full_name || 'غير محدد';
-                setTimeout(async () => {
+                setImmediate(async () => {
                     await sendTelegramMessage(userId.toString(), {
                         text: `<b>😔 عذراً،</b>\n\nتم رفض طلبك لإضافة الشهيد <b>${martyrName}</b>.\n\nيمكنك تقديم طلب جديد بعد مراجعة البيانات والتأكد من صحتها.\n\nللاستفسار تواصل مع: @DevYouns`
                     });
-                }, 1000);
+                });
             }
         });
         
@@ -299,7 +265,7 @@ async function updateRequestStatus(requestId, newStatus, userId) {
     }
 }
 
-// Message Handlers - Same as before but with added error handling
+// Message Handlers
 async function handleTextMessage(chatId, userId, text, userInfo) {
     try {
         // Admin commands
@@ -330,7 +296,6 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
             }
         }
         
-        // Process user commands
         await processUserCommand(chatId, userId, text, userInfo);
     } catch (error) {
         console.error('❌ Error in handleTextMessage:', error);
@@ -339,9 +304,6 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
         });
     }
 }
-
-// All other functions remain the same as in the previous version
-// But I'll add the essential ones for the bot to work
 
 async function processUserCommand(chatId, userId, text, userInfo) {
     if (text === '/start') {
@@ -421,84 +383,6 @@ async function showHelp(chatId) {
     });
 }
 
-// Add simplified versions of other functions for space...
-// [The rest of the functions would be the same as in the complete version]
-
-// Routes
-app.get('/', async (req, res) => {
-    try {
-        const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-        res.json({
-            status: 'ok',
-            message: 'Syrian Martyrs Bot is running! 🌹',
-            timestamp: new Date().toISOString(),
-            mongodb_status: dbStatus,
-            admin_id: ADMIN_USER_ID,
-            version: '1.0.0',
-            env: process.env.NODE_ENV || 'development'
-        });
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message
-        });
-    }
-});
-
-app.get('/health', async (req, res) => {
-    try {
-        // Test database connection
-        await mongoose.connection.db.admin().ping();
-        res.json({ status: 'healthy', db: 'connected' });
-    } catch (error) {
-        res.status(503).json({ status: 'unhealthy', db: 'disconnected', error: error.message });
-    }
-});
-
-app.post('/webhook', async (req, res) => {
-    try {
-        const update = req.body;
-        console.log('📨 Received update from Telegram');
-        
-        if (update.message) {
-            const message = update.message;
-            const chatId = message.chat.id;
-            const userId = message.from.id.toString();
-            
-            const userInfo = {
-                telegram_id: userId,
-                first_name: message.from.first_name || '',
-                last_name: message.from.last_name || '',
-                username: message.from.username || ''
-            };
-            
-            if (message.text) {
-                await handleTextMessage(chatId, userId, message.text, userInfo);
-            } else if (message.photo) {
-                const caption = message.caption || '';
-                // Add photo handling here
-                console.log('📸 Photo received');
-            } else {
-                await sendTelegramMessage(chatId, {
-                    text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
-                });
-            }
-        }
-        
-        // Always respond with 200 OK
-        res.status(200).json({ status: 'ok' });
-        
-    } catch (error) {
-        console.error('❌ Error processing webhook:', error);
-        // Still respond with 200 to avoid Telegram retries
-        res.status(200).json({ 
-            status: 'error', 
-            message: 'Internal error occurred' 
-        });
-    }
-});
-
-// Add the missing functions
 async function handleUserInput(chatId, userId, text) {
     const session = await getUserSession(userId);
     
@@ -618,7 +502,7 @@ async function handlePhotoMessage(chatId, userId, photoData, caption = '') {
         return;
     }
     
-    const photo = photoData[photoData.length - 1]; // أخذ أعلى دقة
+    const photo = photoData[photoData.length - 1];
     const photoFileId = photo.file_id;
     session.data.photo_file_id = photoFileId;
     session.data.photo_caption = caption;
@@ -677,9 +561,11 @@ async function completeRequest(chatId, userId, session) {
             });
         }
         
-        // Send notification to admin
+        // Send notification to admin (async)
         const adminNotificationText = `<b>⭐️ طلب جديد للمراجعة ⭐️</b>\n\n<b>ID الطلب:</b> <code>${requestId}</code>\n<b>ID المستخدم:</b> <code>${userId}</code>\n<b>الاسم:</b> ${fullName}\n\n<b>مقدم الطلب:</b> ${session.userInfo.first_name || ''} ${session.userInfo.last_name || ''} (@${session.userInfo.username || ''})\n\nيمكنك مراجعة الطلب باستخدام /review`;
-        await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
+        setImmediate(async () => {
+            await sendTelegramMessage(ADMIN_USER_ID, { text: adminNotificationText });
+        });
 
     } else {
         await sendTelegramMessage(chatId, {
@@ -741,6 +627,7 @@ async function showUserRequests(chatId, userId) {
     }
 }
 
+// Admin Functions
 async function reviewPendingRequests(chatId) {
     try {
         const requests = await Request.find({ status: 'pending' })
@@ -861,64 +748,124 @@ async function handleCallbackQuery(chatId, callbackData) {
     }
 }
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-    console.error('❌ Unhandled error:', error);
-    res.status(500).json({
-        status: 'error',
-        message: 'Internal server error'
-    });
-});
+// Main Vercel Handler
+export default async function handler(req, res) {
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        status: 'not found',
-        message: 'Endpoint not found'
-    });
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    try {
-        await mongoose.connection.close();
-        console.log('✅ Database connection closed');
-    } catch (error) {
-        console.error('❌ Error closing database:', error);
+    // Handle OPTIONS request for CORS
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
-    process.exit(0);
-});
 
-process.on('SIGTERM', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    try {
-        await mongoose.connection.close();
-        console.log('✅ Database connection closed');
-    } catch (error) {
-        console.error('❌ Error closing database:', error);
-    }
-    process.exit(0);
-});
-
-// Keep-alive ping to prevent sleeping on free tier
-if (process.env.NODE_ENV === 'production') {
-    setInterval(async () => {
+    // Handle GET request (health check)
+    if (req.method === 'GET') {
         try {
-            await axios.get(`https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}/health`);
-            console.log('🏓 Keep-alive ping sent');
+            await connectToDatabase();
+            const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+            
+            return res.status(200).json({
+                status: 'ok',
+                message: 'Syrian Martyrs Bot is running! 🌹',
+                timestamp: new Date().toISOString(),
+                mongodb_status: dbStatus,
+                admin_id: ADMIN_USER_ID || 'not set',
+                version: '1.0.0-vercel',
+                platform: 'Vercel Serverless'
+            });
         } catch (error) {
-            console.error('❌ Keep-alive ping failed:', error.message);
+            return res.status(500).json({
+                status: 'error',
+                message: error.message,
+                timestamp: new Date().toISOString()
+            });
         }
-    }, 14 * 60 * 1000); // Every 14 minutes
-}
+    }
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server is running on port ${PORT}`);
-    console.log(`📱 Bot token: ${BOT_TOKEN.substring(0, 20)}...`);
-    console.log(`👑 Admin ID: ${ADMIN_USER_ID}`);
-    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🎯 Webhook endpoint: /webhook`);
-    console.log(`💚 Health check: /health`);
-});
+    // Handle POST request (Telegram webhook)
+    if (req.method === 'POST') {
+        try {
+            // Connect to database
+            await connectToDatabase();
+
+            const update = req.body;
+            console.log('📨 Webhook received:', update?.message?.message_id || 'callback_query');
+            
+            if (update.message) {
+                const message = update.message;
+                const chatId = message.chat.id;
+                const userId = message.from.id.toString();
+                
+                const userInfo = {
+                    telegram_id: userId,
+                    first_name: message.from.first_name || '',
+                    last_name: message.from.last_name || '',
+                    username: message.from.username || ''
+                };
+                
+                if (message.text) {
+                    await handleTextMessage(chatId, userId, message.text, userInfo);
+                } else if (message.photo) {
+                    const caption = message.caption || '';
+                    await handlePhotoMessage(chatId, userId, message.photo, caption);
+                } else {
+                    await sendTelegramMessage(chatId, {
+                        text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
+                    });
+                }
+
+            } else if (update.callback_query) {
+                const callbackQuery = update.callback_query;
+                const callbackData = callbackQuery.data;
+                const chatId = callbackQuery.message.chat.id;
+                const userId = callbackQuery.from.id.toString();
+
+                // Check if user is admin
+                if (userId === ADMIN_USER_ID) {
+                    await handleCallbackQuery(chatId, callbackData);
+                    
+                    // Answer callback query
+                    try {
+                        await axios.post(`${TELEGRAM_API_URL}answerCallbackQuery`, {
+                            callback_query_id: callbackQuery.id
+                        });
+                    } catch (error) {
+                        console.error('❌ Error answering callback query:', error);
+                    }
+                } else {
+                    // Answer callback query with error message
+                    try {
+                        await axios.post(`${TELEGRAM_API_URL}answerCallbackQuery`, {
+                            callback_query_id: callbackQuery.id,
+                            text: 'غير مسموح لك بهذا العمل',
+                            show_alert: true
+                        });
+                    } catch (error) {
+                        console.error('❌ Error answering callback query:', error);
+                    }
+                }
+            }
+            
+            // Always respond with 200 OK to Telegram
+            return res.status(200).json({ status: 'ok' });
+            
+        } catch (error) {
+            console.error('❌ Error processing webhook:', error);
+            
+            // Still return 200 to avoid Telegram retries
+            return res.status(200).json({ 
+                status: 'error', 
+                message: 'Internal error occurred',
+                error: process.env.NODE_ENV === 'development' ? error.message : 'Hidden'
+            });
+        }
+    }
+
+    // Method not allowed
+    return res.status(405).json({ 
+        status: 'error', 
+        message: 'Method not allowed' 
+    });
+}
