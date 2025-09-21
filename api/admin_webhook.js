@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 
 // Configuration
-const BOT_TOKEN = process.env.ADMIN_BOT_TOKEN; // Use a new token for this bot
+const BOT_TOKEN = process.env.ADMIN_BOT_TOKEN || '8228757774:AAEtnKk-H_Vwpphz4rziw-6pW_US_mKw4ds'; // Use a new token for this bot
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID || '5679396406'; // Your Telegram User ID
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
