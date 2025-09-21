@@ -3,13 +3,10 @@ const mongoose = require('mongoose');
 const axios = require('axios');
 
 // Configuration
-// Using direct strings for troubleshooting.
-// REMEMBER to replace with process.env.YOUR_VARIABLE for production!
-const BOT_TOKEN = '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
-// Replace with your actual user ID
-const ADMIN_USER_ID = '5679396406';
-const MONGODB_URI = 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
-const IMGBB_API_KEY = '7b98d38c418169cf635290b4a31f8e95'; // New: Your imgbb API Key
+const BOT_TOKEN = process.env.BOT_TOKEN || '8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM';
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID || '5679396406';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://adamabood92_db_user:Youns123@younss.ju4twkx.mongodb.net/?retryWrites=true&w=majority&appName=Younss';
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '7b98d38c418169cf635290b4a31f8e95';
 
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${BOT_TOKEN}/`;
 
@@ -336,39 +333,10 @@ async function updateRequestStatus(requestId, newStatus, userId) {
 async function handleTextMessage(chatId, userId, text, userInfo) {
     try {
         console.log(`Handling text message from user ${userId}: "${text}"`);
+        console.log(`Admin User ID from env: ${ADMIN_USER_ID}`);
+        console.log(`Current User ID: ${userId}`);
 
-        // Check if the user is an admin first
-        const isAdmin = userId.toString() === ADMIN_USER_ID;
-
-        // Admin commands
-        if (isAdmin) {
-            if (text === '/review') {
-                await reviewPendingRequests(chatId);
-                return;
-            } else if (text.startsWith('/approve')) {
-                const parts = text.split(' ');
-                if (parts.length === 3) {
-                    await approveRequest(chatId, parts[1], parts[2]);
-                } else {
-                    await sendTelegramMessage(chatId, {
-                        text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /approve [request_id] [user_id]"
-                    });
-                }
-                return;
-            } else if (text.startsWith('/reject')) {
-                const parts = text.split(' ');
-                if (parts.length === 3) {
-                    await rejectRequest(chatId, parts[1], parts[2]);
-                } else {
-                    await sendTelegramMessage(chatId, {
-                        text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /reject [request_id] [user_id]"
-                    });
-                }
-                return;
-            }
-        }
-
-        // Process user commands
+        // Process user commands (admin check is handled inside processUserCommand)
         await processUserCommand(chatId, userId, text, userInfo);
     } catch (error) {
         console.error('❌ Error in handleTextMessage:', error);
@@ -380,9 +348,41 @@ async function handleTextMessage(chatId, userId, text, userInfo) {
 
 async function processUserCommand(chatId, userId, text, userInfo) {
     console.log(`Processing user command: ${text}`);
+    
+    // Check if user is admin
+    const isAdmin = userId.toString() === ADMIN_USER_ID.toString();
+    console.log(`User ${userId} - Is Admin: ${isAdmin}`);
+    
     if (text === '/start') {
         await clearUserSession(userId);
-        const welcomeText = `🌹 أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
+        
+        if (isAdmin) {
+            // Admin welcome message
+            const adminWelcomeText = `👑 مرحباً بك في لوحة الإدارة
+
+🌹 بوت معرض شهداء الساحل السوري
+رحمهم الله وأسكنهم فسيح جناته
+
+🔧 أوامر الإدارة:
+• مراجعة الطلبات المعلقة
+• إضافة شهيد جديد (كإدارة)
+• عرض إحصائيات النظام
+
+📋 أوامر المستخدمين العادية متاحة أيضاً`;
+
+            await sendTelegramMessage(chatId, {
+                text: adminWelcomeText,
+                replyMarkup: getKeyboard([
+                    'مراجعة الطلبات المعلقة', 
+                    'إضافة شهيد جديد', 
+                    'عرض إحصائيات النظام',
+                    'عرض طلباتي',
+                    'مساعدة'
+                ])
+            });
+        } else {
+            // Regular user welcome message
+            const welcomeText = `🌹 أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
 
 رحمهم الله وأسكنهم فسيح جناته
 
@@ -393,25 +393,64 @@ async function processUserCommand(chatId, userId, text, userInfo) {
 
 لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
 
-        await sendTelegramMessage(chatId, {
-            text: welcomeText,
-            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
-        });
+            await sendTelegramMessage(chatId, {
+                text: welcomeText,
+                replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+            });
+        }
+        return;
+    }
 
-    } else if (text === 'إضافة شهيد جديد' || text === '/upload') {
+    // Handle admin-specific commands
+    if (isAdmin) {
+        if (text === 'مراجعة الطلبات المعلقة' || text === '/review') {
+            await reviewPendingRequests(chatId);
+            return;
+        } else if (text === 'عرض إحصائيات النظام' || text === '/stats') {
+            await showSystemStats(chatId);
+            return;
+        } else if (text.startsWith('/approve')) {
+            const parts = text.split(' ');
+            if (parts.length === 3) {
+                await approveRequest(chatId, parts[1], parts[2]);
+            } else {
+                await sendTelegramMessage(chatId, {
+                    text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /approve [request_id] [user_id]"
+                });
+            }
+            return;
+        } else if (text.startsWith('/reject')) {
+            const parts = text.split(' ');
+            if (parts.length === 3) {
+                await rejectRequest(chatId, parts[1], parts[2]);
+            } else {
+                await sendTelegramMessage(chatId, {
+                    text: "صيغة الأمر غير صحيحة. الصيغة الصحيحة: /reject [request_id] [user_id]"
+                });
+            }
+            return;
+        }
+    }
+
+    // Common commands for both admin and users
+    if (text === 'إضافة شهيد جديد' || text === '/upload') {
         await startUploadProcess(chatId, userId, userInfo);
 
     } else if (text === 'مساعدة' || text === '/help') {
-        await showHelp(chatId);
+        await showHelp(chatId, isAdmin);
 
     } else if (text === 'عرض طلباتي' || text === '/my_requests') {
         await showUserRequests(chatId, userId);
 
     } else if (text === 'إلغاء' || text === '/cancel') {
         await clearUserSession(userId);
+        const keyboard = isAdmin ? 
+            ['مراجعة الطلبات المعلقة', 'إضافة شهيد جديد', 'عرض إحصائيات النظام'] :
+            ['إضافة شهيد جديد'];
+        
         await sendTelegramMessage(chatId, {
-            text: "❌ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد باستخدام <b>إضافة شهيد جديد</b>",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+            text: "❌ تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
+            replyMarkup: getKeyboard(keyboard)
         });
 
     } else {
@@ -441,21 +480,46 @@ async function startUploadProcess(chatId, userId, userInfo) {
     }
 }
 
-async function showHelp(chatId) {
-    const helpText = `📖 مساعدة بوت معرض شهداء الساحل السوري
+async function showHelp(chatId, isAdmin = false) {
+    if (isAdmin) {
+        const adminHelpText = `📖 مساعدة لوحة الإدارة - بوت معرض شهداء الساحل السوري
+
+👑 <b>أوامر الإدارة الخاصة:</b>
+🔍 <b>مراجعة الطلبات المعلقة</b> - عرض ومراجعة طلبات إضافة الشهداء
+📊 <b>عرض إحصائيات النظام</b> - عرض إحصائيات شاملة
+✅ <b>/approve [request_id] [user_id]</b> - قبول طلب محدد
+❌ <b>/reject [request_id] [user_id]</b> - رفض طلب محدد
+
+👥 <b>الأوامر العامة (متاحة للإدارة أيضاً):</b>
+📝 <b>إضافة شهيد جديد</b> - إضافة شهيد جديد للمعرض
+📋 <b>عرض طلباتي</b> - عرض حالة طلباتك المقدمة
+
+📞 للدعم التقني: @DevYouns`;
+
+        await sendTelegramMessage(chatId, {
+            text: adminHelpText,
+            replyMarkup: getKeyboard([
+                'مراجعة الطلبات المعلقة', 
+                'إضافة شهيد جديد', 
+                'عرض إحصائيات النظام'
+            ])
+        });
+    } else {
+        const helpText = `📖 مساعدة بوت معرض شهداء الساحل السوري
 
 🔹 <b>إضافة شهيد جديد:</b>
-يمكنك إضافة شهيد جديد باتباع الخطوات
+يمكنك إضافة شهيد جديد باتباع الخطوات المطلوبة
 
 🔹 <b>عرض طلباتي:</b>
 يمكنك مشاهدة حالة جميع طلباتك المقدمة
 
 📞 للمساعدة الإضافية، تواصل مع المدير: @DevYouns`;
 
-    await sendTelegramMessage(chatId, {
-        text: helpText,
-        replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
-    });
+        await sendTelegramMessage(chatId, {
+            text: helpText,
+            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
+        });
+    }
 }
 
 async function handleUserInput(chatId, userId, text) {
@@ -664,7 +728,47 @@ async function completeRequest(chatId, userId, session) {
     }
 }
 
-async function showUserRequests(chatId, userId) {
+async function showSystemStats(chatId) {
+    try {
+        const [totalRequests, pendingRequests, approvedRequests, rejectedRequests, totalMartyrs] = await Promise.all([
+            Request.countDocuments(),
+            Request.countDocuments({ status: 'pending' }),
+            Request.countDocuments({ status: 'approved' }),
+            Request.countDocuments({ status: 'rejected' }),
+            Martyr.countDocuments()
+        ]);
+
+        const statsText = `📊 <b>إحصائيات النظام</b>
+
+👥 <b>الطلبات:</b>
+📋 إجمالي الطلبات: ${totalRequests}
+⏳ قيد المراجعة: ${pendingRequests}
+✅ تم القبول: ${approvedRequests}
+❌ تم الرفض: ${rejectedRequests}
+
+🌹 <b>الشهداء:</b>
+👤 إجمالي الشهداء المسجلين: ${totalMartyrs}
+
+📈 <b>معدل القبول:</b>
+${totalRequests > 0 ? Math.round((approvedRequests / totalRequests) * 100) : 0}%`;
+
+        await sendTelegramMessage(chatId, {
+            text: statsText,
+            replyMarkup: getKeyboard([
+                'مراجعة الطلبات المعلقة', 
+                'إضافة شهيد جديد',
+                'مساعدة'
+            ])
+        });
+
+    } catch (error) {
+        console.error('❌ Error showing system stats:', error);
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في عرض الإحصائيات",
+            replyMarkup: getKeyboard(['مراجعة الطلبات المعلقة', 'إضافة شهيد جديد'])
+        });
+    }
+}
     try {
         const requests = await Request.find({ userId: userId.toString() })
             .sort({ createdAt: -1 })
