@@ -1,10 +1,7 @@
-name = "data-user-bot"
+name = 'botdata'
 main = "src/index.js"
 compatibility_date = "2024-09-21"
 
-[vars]
-BOT_TOKEN = "8272634262:AAHXUYw_Q-0fwuyFAc5j6ntgtZHt3VyWCOM"
-IMGBB_API_KEY = "7b98d38c418169cf635290b4a31f8e95"
 
 [[d1_databases]]
 binding = "DB"
