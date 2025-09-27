@@ -1,5 +1,5 @@
 import { sendTelegramMessage, uploadPhotoToImgbb } from './telegram.js';
-import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, MAIN_KEYBOARD_LAYOUT } from './ui.js';
+import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, createMainKeyboard } from './ui.js';
 import { saveUserSession, saveRequest, clearUserSession } from './database.js';
 
 export async function showMyAdditions(chatId, userId, env) {
@@ -19,7 +19,7 @@ export async function showMyAdditions(chatId, userId, env) {
         } else {
              await sendTelegramMessage(chatId, {
                 text: "لم تقم بإضافة أي شهيد حتى الآن.",
-                replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
 
@@ -27,7 +27,7 @@ export async function showMyAdditions(chatId, userId, env) {
         console.error('Error showing user additions:', error);
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في عرض إضافاتك.",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
@@ -78,7 +78,7 @@ export async function showUserRequests(chatId, userId, env) {
         if ((!approvedResults || approvedResults.length === 0) && (!pendingResults || pendingResults.length === 0)) {
              await sendTelegramMessage(chatId, {
                 text: "لا توجد طلبات مقدمة من قبلك حتى الآن",
-                replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
 
@@ -86,7 +86,7 @@ export async function showUserRequests(chatId, userId, env) {
         console.error('Error showing user requests:', error);
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في عرض طلباتك",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
@@ -129,7 +129,7 @@ export async function startUploadProcess(chatId, userId, userInfo, env, original
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ، يرجى المحاولة مرة أخرى",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
@@ -148,7 +148,7 @@ export async function showHelp(chatId, env) {
 
     await sendTelegramMessage(chatId, {
         text: helpText,
-        replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+        replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
     }, env);
 }
 
@@ -211,18 +211,18 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
             await sendTelegramMessage(chatId, {
                 photoCaption: messageSummary,
                 photoId: martyrData.photo_file_id,
-                replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         } else {
             await sendTelegramMessage(chatId, {
                 text: messageSummary,
-                replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
     } else {
         await sendTelegramMessage(chatId, {
             text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
