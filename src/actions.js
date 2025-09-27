@@ -1,5 +1,5 @@
 import { sendTelegramMessage, uploadPhotoToImgbb } from './telegram.js';
-import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES } from './ui.js';
+import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, MAIN_KEYBOARD_LAYOUT } from './ui.js';
 import { saveUserSession, saveRequest, clearUserSession } from './database.js';
 
 export async function showMyAdditions(chatId, userId, env) {
@@ -136,9 +136,15 @@ export async function startUploadProcess(chatId, userId, userInfo, env, original
 
 
 export async function showHelp(chatId, env) {
-    const helpText = `مساعدة بوت معرض شهداء الساحل السوري\n\n<b>إضافة شهيد جديد:</b>\nيمكنك إضافة شهيد جديد باتباع الخطوات المطلوبة\n\n<b>عرض طلباتي:</b>\nيمكنك مشاهدة حالة جميع طلباتك المقدمة، وطلب تعديل أو حذف المقبول منها.\n\nللمساعدة الإضافية، تواصل مع المدير: @DevYouns
+    const helpText = `مساعدة بوت معرض شهداء الساحل السوري
 
-`;
+<b>إضافة شهيد جديد:</b>
+يمكنك إضافة شهيد جديد باتباع الخطوات المطلوبة
+
+<b>عرض طلباتي:</b>
+يمكنك مشاهدة حالة جميع طلباتك المقدمة، وطلب تعديل أو حذف المقبول منها.
+
+للمساعدة الإضافية، تواصل مع المدير: @DevYouns`;
 
     await sendTelegramMessage(chatId, {
         text: helpText,
@@ -199,7 +205,16 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         await clearUserSession(userId, env);
 
         const actionText = isEditing ? "تعديل" : "إضافة";
-        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\nسيتم مراجعة طلبك من قبل الإدارة.`;
+        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!
+
+<b>ملخص البيانات:</b>
+الاسم: ${fullName}
+العمر: ${martyrData.age || 'غير متوفر'}
+الولادة: ${martyrData.birth_date || 'غير متوفر'}
+الاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}
+المكان: ${martyrData.place || 'غير متوفر'}
+
+سيتم مراجعة طلبك من قبل الإدارة.`;
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {
@@ -220,7 +235,6 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         }, env);
     }
 }
-
 
 
 export async function showHelp(chatId, env) {
