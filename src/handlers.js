@@ -1,6 +1,6 @@
 import { sendTelegramMessage, answerCallbackQuery } from './telegram.js';
 import { clearUserSession, getUserSession, saveUserSession, createDeleteRequest, getPendingRequestByTargetId, deleteRequest } from './database.js';
-import { getKeyboard, STATES, MAIN_KEYBOARD_LAYOUT } from './ui.js';
+import { getKeyboard, STATES, createMainKeyboard } from './ui.js';
 import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
 import { calculateAge } from './utils.js';
 
@@ -35,7 +35,7 @@ async function processUserCommand(chatId, userId, text, userInfo, env) {
 
         await sendTelegramMessage(chatId, {
             text: welcomeText,
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
         return;
     }
@@ -43,7 +43,8 @@ async function processUserCommand(chatId, userId, text, userInfo, env) {
     if (text === 'إضافة شهيد جديد' || text === '/upload') {
         await startUploadProcess(chatId, userId, userInfo, env);
     } else if (text === 'مساعدة' || text === '/help') {
-        await showHelp(chatId, env);
+        const session = await getUserSession(userId, env);
+        await showHelp(chatId, env, session.state);
     } else if (text === 'عرض طلباتي' || text === '/my_requests') {
         await showUserRequests(chatId, userId, env);
     } else if (text === 'عرض اضافاتي') {
@@ -52,7 +53,7 @@ async function processUserCommand(chatId, userId, text, userInfo, env) {
         await clearUserSession(userId, env);
         await sendTelegramMessage(chatId, {
             text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     } else {
         await handleUserInput(chatId, userId, text, env);
@@ -66,7 +67,7 @@ async function handleUserInput(chatId, userId, text, env) {
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
             text: "لا توجد عملية جارية. استخدم أحد الأزرار في القائمة.",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(session.state))
         }, env);
         return;
     }
@@ -149,7 +150,7 @@ export async function handlePhotoMessage(chatId, userId, photoData, caption = ''
     if (session.state !== STATES.WAITING_PHOTO) {
         await sendTelegramMessage(chatId, {
             text: "يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
-            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
+            replyMarkup: getKeyboard(createMainKeyboard(session.state))
         }, env);
         return;
     }

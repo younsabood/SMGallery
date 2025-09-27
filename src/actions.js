@@ -5,8 +5,8 @@ import { saveUserSession, saveRequest, clearUserSession } from './database.js';
 export async function showMyAdditions(chatId, userId, env) {
     try {
         const { results: approvedResults } = await env.DB.prepare(
-            "SELECT id, full_name FROM submission_requests WHERE user_id = ? AND status = ? AND type = 'add' ORDER BY created_at DESC"
-        ).bind(userId, REQUEST_STATUS.APPROVED).all();
+            "SELECT id, full_name FROM martyrs WHERE telegram_id = ? ORDER BY created_at DESC"
+        ).bind(userId).all();
 
         if (approvedResults && approvedResults.length > 0) {
             await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم:</b>" }, env);

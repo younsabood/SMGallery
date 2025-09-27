@@ -21,11 +21,23 @@ export const REQUEST_TYPE = {
     DELETE: 'delete'
 };
 
-export const MAIN_KEYBOARD_LAYOUT = [
-    ['إضافة شهيد جديد'],
-    ['عرض طلباتي', 'عرض اضافاتي'],
-    ['مساعدة', 'إلغاء']
-];
+export function createMainKeyboard(state) {
+    const layout = [
+        ['إضافة شهيد جديد'],
+        ['عرض طلباتي', 'عرض اضافاتي'],
+        ['مساعدة']
+    ];
+
+    if (state && state !== STATES.IDLE) {
+        // Find the row with 'مساعدة' and add 'إلغاء' to it
+        const helpRow = layout.find(row => row.includes('مساعدة'));
+        if (helpRow) {
+            helpRow.push('إلغاء');
+        }
+    }
+
+    return layout;
+}
 
 export function getKeyboard(layout) {
     if (!Array.isArray(layout) || !Array.isArray(layout[0])) {
