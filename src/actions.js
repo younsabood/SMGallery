@@ -205,16 +205,7 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         await clearUserSession(userId, env);
 
         const actionText = isEditing ? "تعديل" : "إضافة";
-        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!
-
-<b>ملخص البيانات:</b>
-الاسم: ${fullName}
-العمر: ${martyrData.age || 'غير متوفر'}
-الولادة: ${martyrData.birth_date || 'غير متوفر'}
-الاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}
-المكان: ${martyrData.place || 'غير متوفر'}
-
-سيتم مراجعة طلبك من قبل الإدارة.`;
+        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\nسيتم مراجعة طلبك من قبل الإدارة.`;
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {
@@ -268,7 +259,7 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         await sendTelegramMessage(chatId, { text: "جاري تحميل الصورة، يرجى الانتظار..." }, env);
         imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
         if (!imgbbUrl) {
-            await sendTelegramMessage(chatId, { text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى." }, env);
+            await sendTelegramMessage(chatId, { text: "حدث خطأ في تحميل الصورة. يرى إعادة المحاولة وإرفاق صورة." }, env);
             return;
         }
     } else if (isEditing && skipPhoto) {
@@ -307,16 +298,7 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         await clearUserSession(userId, env);
 
         const actionText = isEditing ? "تعديل" : "إضافة";
-        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!
-
-<b>ملخص البيانات:</b>
-الاسم: ${fullName}
-العمر: ${martyrData.age || 'غير متوفر'}
-الولادة: ${martyrData.birth_date || 'غير متوفر'}
-الاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}
-المكان: ${martyrData.place || 'غير متوفر'}
-
-سيتم مراجعة طلبك من قبل الإدارة.`;
+        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\nسيتم مراجعة طلبك من قبل الإدارة.`;
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {
