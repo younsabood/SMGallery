@@ -63,6 +63,18 @@ export async function isUserBlocked(userId, env) {
     }
 }
 
+export async function getPendingRequestByTargetId(targetMartyrId, env) {
+    try {
+        const result = await env.DB.prepare(
+            "SELECT * FROM submission_requests WHERE target_martyr_id = ? AND status = 'pending'"
+        ).bind(targetMartyrId).first();
+        return result || null;
+    } catch (error) {
+        console.error('Error getting pending request by target ID:', error);
+        return null;
+    }
+}
+
 export async function saveRequest(userId, requestData, env, type = REQUEST_TYPE.ADD, targetId = null) {
     try {
         const result = await env.DB.prepare(
@@ -123,3 +135,70 @@ export async function createDeleteRequest(userId, originalRequest, env) {
         return false;
     }
 }
+
+export async function deleteRequest(requestId, env) {
+    try {
+        await env.DB.prepare('DELETE FROM submission_requests WHERE id = ?').bind(requestId).run();
+        console.log(`Request ${requestId} deleted.`);
+        return true;
+    } catch (error) {
+        console.error(`Error deleting request ${requestId}:`, error);
+        return false;
+    }
+}
+
+export async function getUserRequestStatus(userId, env) {
+    try {
+        let status = await env.DB.prepare('SELECT * FROM block WHERE telegram_id = ?').bind(userId).first();
+        if (!status) {
+            // If user is not in the table, create a new entry
+            await env.DB.prepare('INSERT INTO block (telegram_id) VALUES (?) ON CONFLICT(telegram_id) DO NOTHING').bind(userId).run();
+            status = { telegram_id: userId, is_block: 0, reached_limit: 0, request_count: 0 };
+        }
+        // Convert boolean values from 0/1 to false/true
+        status.is_block = !!status.is_block;
+        status.reached_limit = !!status.reached_limit;
+        return status;
+    } catch (error) {
+        console.error('Error getting user request status:', error);
+        return { is_block: false, reached_limit: false, request_count: 0 }; // Default to safe values
+    }
+}
+
+export async function incrementRequestCount(userId, env) {
+    try {
+        const result = await env.DB.prepare(
+            'UPDATE block SET request_count = request_count + 1 WHERE telegram_id = ? RETURNING request_count'
+        ).bind(userId).first();
+        return result ? result.request_count : null;
+    } catch (error) {
+        console.error('Error incrementing request count:', error);
+        return null;
+    }
+}
+
+export async function blockUserForLimit(userId, env) {
+    try {
+        await env.DB.prepare(
+            'UPDATE block SET is_block = 1, reached_limit = 1 WHERE telegram_id = ?'
+        ).bind(userId).run();
+        return true;
+    } catch (error) {
+        console.error('Error blocking user for limit:', error);
+        return false;
+    }
+}
+
+export async function resetAllRequestCounts(env) {
+    try {
+        await env.DB.prepare(
+            'UPDATE block SET request_count = 0, reached_limit = 0, is_block = 0 WHERE reached_limit = 1'
+        ).run();
+        console.log('Request counts have been reset for rate-limited users.');
+        return true;
+    } catch (error) {
+        console.error('Error resetting request counts:', error);
+        return false;
+    }
+}
+

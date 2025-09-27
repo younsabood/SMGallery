@@ -1,7 +1,8 @@
 import { sendTelegramMessage, answerCallbackQuery } from './telegram.js';
-import { clearUserSession, getUserSession, saveUserSession, createDeleteRequest } from './database.js';
-import { getKeyboard, STATES } from './ui.js';
-import { showUserRequests, startUploadProcess, showHelp, completeRequest } from './actions.js';
+import { clearUserSession, getUserSession, saveUserSession, createDeleteRequest, getPendingRequestByTargetId, deleteRequest } from './database.js';
+import { getKeyboard, STATES, MAIN_KEYBOARD_LAYOUT } from './ui.js';
+import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
+import { calculateAge } from './utils.js';
 
 export async function handleTextMessage(chatId, userId, text, userInfo, env) {
     try {
@@ -27,13 +28,14 @@ async function processUserCommand(chatId, userId, text, userInfo, env) {
 الأوامر المتاحة:
 • إضافة شهيد جديد
 • عرض طلباتي
+• عرض اضافاتي
 • المساعدة
 
 لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
 
         await sendTelegramMessage(chatId, {
             text: welcomeText,
-            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
         }, env);
         return;
     }
@@ -44,11 +46,13 @@ async function processUserCommand(chatId, userId, text, userInfo, env) {
         await showHelp(chatId, env);
     } else if (text === 'عرض طلباتي' || text === '/my_requests') {
         await showUserRequests(chatId, userId, env);
+    } else if (text === 'عرض اضافاتي') {
+        await showMyAdditions(chatId, userId, env);
     } else if (text === 'إلغاء' || text === '/cancel') {
         await clearUserSession(userId, env);
         await sendTelegramMessage(chatId, {
             text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي', 'مساعدة'])
+            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
         }, env);
     } else {
         await handleUserInput(chatId, userId, text, env);
@@ -61,8 +65,8 @@ async function handleUserInput(chatId, userId, text, env) {
 
     if (session.state === STATES.IDLE) {
         await sendTelegramMessage(chatId, {
-            text: "لا توجد عملية جارية. استخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد', 'عرض طلباتي'])
+            text: "لا توجد عملية جارية. استخدم أحد الأزرار في القائمة.",
+            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
         }, env);
         return;
     }
@@ -92,20 +96,6 @@ async function handleUserInput(chatId, userId, text, env) {
 
         case STATES.WAITING_FAMILY_NAME:
             sessionData.family_name = text.trim();
-            session.state = STATES.WAITING_AGE;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال عمر الشهيد: ${isEditing ? `(الحالي: ${session.data.age})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
-
-        case STATES.WAITING_AGE:
-            const age = parseInt(text);
-            if (isNaN(age) || age < 0 || age > 150) {
-                await sendTelegramMessage(chatId, { text: "الرجاء إدخال عمر صحيح (0-150)" }, env);
-                return;
-            }
-            sessionData.age = age;
             session.state = STATES.WAITING_BIRTH_DATE;
             await sendTelegramMessage(chatId, {
                 text: `الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15): ${isEditing ? `(الحالي: ${session.data.birth_date})` : ''}`,
@@ -124,6 +114,7 @@ async function handleUserInput(chatId, userId, text, env) {
 
         case STATES.WAITING_MARTYRDOM_DATE:
             sessionData.martyrdom_date = text.trim();
+            sessionData.age = calculateAge(sessionData.birth_date, sessionData.martyrdom_date);
             session.state = STATES.WAITING_PLACE;
             await sendTelegramMessage(chatId, {
                 text: `الرجاء إدخال مكان الاستشهاد: ${isEditing ? `(الحالي: ${session.data.place})` : ''}`,
@@ -158,7 +149,7 @@ export async function handlePhotoMessage(chatId, userId, photoData, caption = ''
     if (session.state !== STATES.WAITING_PHOTO) {
         await sendTelegramMessage(chatId, {
             text: "يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
-            replyMarkup: getKeyboard(['إضافة شهيد جديد'])
+            replyMarkup: getKeyboard(MAIN_KEYBOARD_LAYOUT)
         }, env);
         return;
     }
@@ -183,6 +174,14 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
         return;
     }
     const originalRequest = results[0];
+
+    // Check for existing pending requests
+    const existingPendingRequest = await getPendingRequestByTargetId(originalRequest.id, env);
+    if (existingPendingRequest) {
+        // Delete the existing pending request
+        await deleteRequest(existingPendingRequest.id, env);
+    }
+
     const userInfo = {
         telegram_id: callbackQuery.from.id,
         first_name: callbackQuery.from.first_name || '',

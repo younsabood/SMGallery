@@ -1,5 +1,5 @@
 import { handleTextMessage, handlePhotoMessage, handleCallbackQuery } from './handlers.js';
-import { isUserBlocked } from './database.js';
+import { getUserRequestStatus, incrementRequestCount, blockUserForLimit, resetAllRequestCounts } from './database.js';
 import { sendTelegramMessage } from './telegram.js';
 
 // Main handler
@@ -17,9 +17,17 @@ async function handleRequest(request, env) {
             }
 
             if (userId) {
-                const blocked = await isUserBlocked(userId, env);
-                if (blocked) {
+                const userStatus = await getUserRequestStatus(userId, env);
+
+                if (userStatus.is_block) {
                     console.log(`User ${userId} is blocked. Ignoring update.`);
+                    return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
+                }
+
+                const newRequestCount = await incrementRequestCount(userId, env);
+                if (newRequestCount > 200) {
+                    await blockUserForLimit(userId, env);
+                    console.log(`User ${userId} has been blocked for exceeding the rate limit.`);
                     return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
                 }
             }
@@ -78,4 +86,8 @@ export default {
     async fetch(request, env, ctx) {
         return handleRequest(request, env);
     },
+    async scheduled(event, env, ctx) {
+        console.log('Running scheduled task to reset request counts...');
+        await resetAllRequestCounts(env);
+    }
 };
