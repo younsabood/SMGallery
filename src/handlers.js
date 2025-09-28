@@ -11,7 +11,7 @@ import {
 } from './database.js';
 import { getKeyboard, STATES, createMainKeyboard } from './ui.js';
 import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
-import { calculateAge } from './utils.js';
+import { calculateAge, parseDate } from './utils.js';
 
 const COMMANDS = {
     START: '/start',
@@ -65,7 +65,7 @@ const STATE_MACHINE_CONFIG = {
 
 export async function handleTextMessage(chatId, userId, text, userInfo, env) {
     try {
-        console.log(`Handling text message from user ${userId}: "${text}"`);
+        console.log(`Handling text message from user ${userId}: \"${text}\"`);
         await processUserCommand(chatId, userId, text, userInfo, env);
     } catch (error) {
         console.error('Error in handleTextMessage:', error);
@@ -122,7 +122,17 @@ async function handleUserInput(chatId, userId, text, env) {
     const stateConfig = STATE_MACHINE_CONFIG[session.state];
 
     if (stateConfig) {
-        session.data[stateConfig.sessionKey] = text.trim();
+        const trimmedText = text.trim();
+
+        if (session.state === STATES.WAITING_BIRTH_DATE || session.state === STATES.WAITING_MARTYRDOM_DATE) {
+            const parsedDate = parseDate(trimmedText);
+            if (!parsedDate) {
+                await sendTelegramMessage(chatId, { text: "التنسيق غير صالح. الرجاء إدخال التاريخ بالتنسيق الصحيح (مثال: 1990/01/15)", replyMarkup: getKeyboard(['إلغاء']) }, env);
+                return; // Stay in the same state
+            }
+        }
+
+        session.data[stateConfig.sessionKey] = trimmedText;
         session.state = stateConfig.nextState;
 
         if (stateConfig.onTransition) {
@@ -199,7 +209,7 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
                 return;
             }
             const success = await createDeleteRequest(userId, originalMartyr, env);
-            const message = success ? `تم إرسال طلب لحذف الشهيد "<b>${originalMartyr.full_name}</b>".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
+            const message = success ? `تم إرسال طلب لحذف الشهيد \"<b>${originalMartyr.full_name}</b>\".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
             await sendTelegramMessage(chatId, { text: message }, env);
         }
         return; // Important: return after handling martyr actions
@@ -227,7 +237,7 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
 
     if (action === 'delete') {
         const success = await createDeleteRequest(userId, originalRequest, env);
-        const message = success ? `تم إرسال طلب لحذف الشهيد "<b>${originalRequest.full_name}</b>".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
+        const message = success ? `تم إرسال طلب لحذف الشهيد \"<b>${originalRequest.full_name}</b>\".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
         await sendTelegramMessage(chatId, { text: message }, env);
     } else if (action === 'edit') {
         await startUploadProcess(chatId, userId, userInfo, env, originalRequest, false);
