@@ -21,9 +21,8 @@ export async function showMyAdditions(chatId, userId, env) {
 <b>مكان الاستشهاد:</b> ${martyr.place || 'غير متوفر'}
                 `.trim();
 
-                // Use the submission_id from the martyrs table for the callback
-                // This assumes the 'submission_id' column exists and links back to the submission_requests table
-                const submissionId = martyr.submission_id;
+                // Assuming martyr.id in the martyrs table corresponds to the original submission_requests.id
+                const submissionId = martyr.id;
                 let inlineKeyboard;
 
                 if (submissionId) {
@@ -39,7 +38,7 @@ export async function showMyAdditions(chatId, userId, env) {
                     await sendTelegramMessage(chatId, {
                         photoId: martyr.image_url,
                         photoCaption: caption,
-                        replyMarkup: inlineKeyboard // Will be undefined if no submissionId, which is fine
+                        replyMarkup: inlineKeyboard
                     }, env);
                 } else {
                     await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
@@ -70,14 +69,29 @@ export async function showUserRequests(chatId, userId, env) {
         if (pendingRequests && pendingRequests.length > 0) {
             await sendTelegramMessage(chatId, { text: "<b>طلباتك قيد المراجعة:</b>" }, env);
             for (const req of pendingRequests) {
-                let requestText = `⏳ <b>${req.full_name}</b> (طلب ${req.type})\n   الحالة: قيد المراجعة`;
+                const caption = `
+⏳ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+<b>الحالة:</b> قيد المراجعة
+                `.trim();
                 const inlineKeyboard = {
                     inline_keyboard: [[
                         { text: '✏️ تعديل', callback_data: `pending_edit_${req.id}` },
                         { text: '🗑️ حذف', callback_data: `pending_delete_${req.id}` }
                     ]]
                 };
-                await sendTelegramMessage(chatId, { text: requestText, replyMarkup: inlineKeyboard }, env);
+                if (req.image_url) {
+                    await sendTelegramMessage(chatId, {
+                        photoId: req.image_url,
+                        photoCaption: caption,
+                        replyMarkup: inlineKeyboard
+                    }, env);
+                } else {
+                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
+                }
             }
         }
 
@@ -88,13 +102,28 @@ export async function showUserRequests(chatId, userId, env) {
         if (rejectedRequests && rejectedRequests.length > 0) {
             await sendTelegramMessage(chatId, { text: "<b>طلباتك المرفوضة:</b>" }, env);
             for (const req of rejectedRequests) {
-                let requestText = `❌ <b>${req.full_name}</b> (طلب ${req.type})\n   الحالة: تم الرفض`;
+                const caption = `
+❌ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+<b>الحالة:</b> تم الرفض
+                `.trim();
                 const inlineKeyboard = {
                     inline_keyboard: [[
                         { text: '🗑️ حذف', callback_data: `rejected_delete_${req.id}` }
                     ]]
                 };
-                await sendTelegramMessage(chatId, { text: requestText, replyMarkup: inlineKeyboard }, env);
+                if (req.image_url) {
+                    await sendTelegramMessage(chatId, {
+                        photoId: req.image_url,
+                        photoCaption: caption,
+                        replyMarkup: inlineKeyboard
+                    }, env);
+                } else {
+                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
+                }
             }
         }
 
