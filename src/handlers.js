@@ -6,7 +6,8 @@ import {
     createDeleteRequest, 
     getPendingRequestByTargetId, 
     deleteRequest, 
-    getSubmissionRequestByIdAndUser 
+    getSubmissionRequestByIdAndUser, 
+    getMartyrByIdAndUser 
 } from './database.js';
 import { getKeyboard, STATES, createMainKeyboard } from './ui.js';
 import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
@@ -169,6 +170,39 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
         const message = success ? "تم حذف الطلب بنجاح." : "حدث خطأ أثناء حذف الطلب.";
         await sendTelegramMessage(chatId, { text: message }, env);
         return;
+    }
+
+    // Handle actions on existing martyrs (from "My Additions")
+    if (action === 'edit' || action === 'delete') {
+        const originalMartyr = await getMartyrByIdAndUser(requestId, userId, env); // Use new function
+
+        if (!originalMartyr) {
+            await sendTelegramMessage(chatId, { text: "لم يتم العثور على الشهيد أو لا تملك صلاحية الوصول إليه." }, env);
+            return;
+        }
+
+        const userInfo = callbackQuery.from;
+
+        if (action === 'edit') {
+            // Check if there's already a pending edit request for this martyr
+            const existingPendingRequest = await getPendingRequestByTargetId(originalMartyr.id, env);
+            if (existingPendingRequest) {
+                await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
+                return;
+            }
+            await startUploadProcess(chatId, userId, userInfo, env, originalMartyr, false); // originalRequest is a martyr here
+        } else if (action === 'delete') {
+            // Check if there's already a pending delete request for this martyr
+            const existingPendingRequest = await getPendingRequestByTargetId(originalMartyr.id, env);
+            if (existingPendingRequest) {
+                await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل بالفعل لهذا الشهيد.` }, env);
+                return;
+            }
+            const success = await createDeleteRequest(userId, originalMartyr, env);
+            const message = success ? `تم إرسال طلب لحذف الشهيد "<b>${originalMartyr.full_name}</b>".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
+            await sendTelegramMessage(chatId, { text: message }, env);
+        }
+        return; // Important: return after handling martyr actions
     }
 
     const originalRequest = await getSubmissionRequestByIdAndUser(requestId, userId, env);

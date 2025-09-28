@@ -204,6 +204,11 @@ export async function getSubmissionImageUrl(submissionId, env) {
  * @returns {Promise<object|null>} The request object or null if not found.
  */
 export async function getSubmissionRequestByIdAndUser(requestId, userId, env) {
-    const query = "SELECT * FROM martyrs WHERE id = ? AND user_id = ?";
+    const query = "SELECT * FROM submission_requests WHERE id = ? AND user_id = ?";
     return executeQuery(env.DB, query, [requestId, userId], 'first', 'Error fetching submission request by ID and user');
+}
+
+export async function getMartyrByIdAndUser(martyrId, userId, env) {
+    const query = "SELECT * FROM martyrs WHERE id = ? AND telegram_id = ?";
+    return executeQuery(env.DB, query, [martyrId, userId], 'first', 'Error fetching martyr by ID and user');
 }
