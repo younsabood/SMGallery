@@ -4,34 +4,42 @@ import { saveUserSession, saveRequest, clearUserSession, deleteRequest, updateRe
 
 export async function showMyAdditions(chatId, userId, env) {
     try {
-        const { results: approvedRequests } = await env.DB.prepare(
-            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
-        ).bind(userId, REQUEST_STATUS.APPROVED).all();
+        // Select from the final martyrs table as requested by the user
+        const { results: martyrs } = await env.DB.prepare(
+            "SELECT * FROM martyrs WHERE telegram_id = ? ORDER BY created_at DESC"
+        ).bind(userId).all();
 
-        if (approvedRequests && approvedRequests.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم (مقبولين):</b>\n\nيمكنك طلب تعديل بياناتهم أو حذفهم." }, env);
+        if (martyrs && martyrs.length > 0) {
+            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم:</b>" }, env);
 
-            for (const req of approvedRequests) {
+            for (const martyr of martyrs) {
                 const caption = `
-<b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
-<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
-<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
-<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
-<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+<b>الاسم الكامل:</b> ${martyr.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${martyr.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${martyr.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${martyr.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${martyr.place || 'غير متوفر'}
                 `.trim();
 
-                const inlineKeyboard = {
-                    inline_keyboard: [[
-                        { text: '✏️ تعديل', callback_data: `edit_${req.id}` },
-                        { text: '🗑️ حذف', callback_data: `delete_${req.id}` }
-                    ]]
-                };
+                // Use the submission_id from the martyrs table for the callback
+                // This assumes the 'submission_id' column exists and links back to the submission_requests table
+                const submissionId = martyr.submission_id;
+                let inlineKeyboard;
 
-                if (req.image_url) {
+                if (submissionId) {
+                    inlineKeyboard = {
+                        inline_keyboard: [[
+                            { text: '✏️ تعديل', callback_data: `edit_${submissionId}` },
+                            { text: '🗑️ حذف', callback_data: `delete_${submissionId}` }
+                        ]]
+                    };
+                }
+
+                if (martyr.image_url) {
                     await sendTelegramMessage(chatId, {
-                        photoId: req.image_url,
+                        photoId: martyr.image_url,
                         photoCaption: caption,
-                        replyMarkup: inlineKeyboard
+                        replyMarkup: inlineKeyboard // Will be undefined if no submissionId, which is fine
                     }, env);
                 } else {
                     await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
@@ -39,7 +47,7 @@ export async function showMyAdditions(chatId, userId, env) {
             }
         } else {
              await sendTelegramMessage(chatId, {
-                text: "لم تقم بإضافة أي شهيد مقبول حتى الآن.",
+                text: "لم تقم بإضافة أي شهيد حتى الآن.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
