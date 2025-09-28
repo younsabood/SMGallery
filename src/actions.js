@@ -1,24 +1,45 @@
 import { sendTelegramMessage, uploadPhotoToImgbb } from './telegram.js';
 import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, createMainKeyboard } from './ui.js';
-import { saveUserSession, saveRequest, clearUserSession } from './database.js';
+import { saveUserSession, saveRequest, clearUserSession, deleteRequest, updateRequest } from './database.js';
 
 export async function showMyAdditions(chatId, userId, env) {
     try {
-        const { results: approvedResults } = await env.DB.prepare(
-            "SELECT id, full_name FROM martyrs WHERE telegram_id = ? ORDER BY created_at DESC"
-        ).bind(userId).all();
+        const { results: approvedRequests } = await env.DB.prepare(
+            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
+        ).bind(userId, REQUEST_STATUS.APPROVED).all();
 
-        if (approvedResults && approvedResults.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم:</b>" }, env);
+        if (approvedRequests && approvedRequests.length > 0) {
+            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم (مقبولين):</b>\n\nيمكنك طلب تعديل بياناتهم أو حذفهم." }, env);
 
-            for (const req of approvedResults) {
-                const martyrName = req.full_name || 'غير محدد';
-                const messageText = `<b>${martyrName}</b>`;
-                await sendTelegramMessage(chatId, { text: messageText }, env);
+            for (const req of approvedRequests) {
+                const caption = `
+<b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+                `.trim();
+
+                const inlineKeyboard = {
+                    inline_keyboard: [[
+                        { text: '✏️ تعديل', callback_data: `edit_${req.id}` },
+                        { text: '🗑️ حذف', callback_data: `delete_${req.id}` }
+                    ]]
+                };
+
+                if (req.image_url) {
+                    await sendTelegramMessage(chatId, {
+                        photoId: req.image_url,
+                        photoCaption: caption,
+                        replyMarkup: inlineKeyboard
+                    }, env);
+                } else {
+                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
+                }
             }
         } else {
              await sendTelegramMessage(chatId, {
-                text: "لم تقم بإضافة أي شهيد حتى الآن.",
+                text: "لم تقم بإضافة أي شهيد مقبول حتى الآن.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
@@ -34,50 +55,44 @@ export async function showMyAdditions(chatId, userId, env) {
 
 export async function showUserRequests(chatId, userId, env) {
     try {
-        const { results: approvedResults } = await env.DB.prepare(
-            'SELECT id, full_name FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC'
-        ).bind(userId, REQUEST_STATUS.APPROVED).all();
+        const { results: pendingRequests } = await env.DB.prepare(
+            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
+        ).bind(userId, REQUEST_STATUS.PENDING).all();
 
-        if (approvedResults && approvedResults.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم (مقبولين):</b>\n\nيمكنك طلب تعديل بياناتهم أو حذفهم." }, env);
-
-            for (const req of approvedResults) {
-                const martyrName = req.full_name || 'غير محدد';
-                const messageText = `<b>${martyrName}</b>\n\nاختر الإجراء الذي تريده:`;
+        if (pendingRequests && pendingRequests.length > 0) {
+            await sendTelegramMessage(chatId, { text: "<b>طلباتك قيد المراجعة:</b>" }, env);
+            for (const req of pendingRequests) {
+                let requestText = `⏳ <b>${req.full_name}</b> (طلب ${req.type})\n   الحالة: قيد المراجعة`;
                 const inlineKeyboard = {
                     inline_keyboard: [[
-                        { text: '✏️ تعديل', callback_data: `edit_${req.id}` },
-                        { text: '🗑️ حذف', callback_data: `delete_${req.id}` }
+                        { text: '✏️ تعديل', callback_data: `pending_edit_${req.id}` },
+                        { text: '🗑️ حذف', callback_data: `pending_delete_${req.id}` }
                     ]]
                 };
-                await sendTelegramMessage(chatId, { text: messageText, replyMarkup: inlineKeyboard }, env);
+                await sendTelegramMessage(chatId, { text: requestText, replyMarkup: inlineKeyboard }, env);
             }
         }
 
-        const { results: pendingResults } = await env.DB.prepare(
-            'SELECT full_name, status, type FROM submission_requests WHERE user_id = ? AND status != ? ORDER BY created_at DESC'
-        ).bind(userId, REQUEST_STATUS.APPROVED).all();
+        const { results: rejectedRequests } = await env.DB.prepare(
+            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
+        ).bind(userId, REQUEST_STATUS.REJECTED).all();
 
-
-        if (pendingResults && pendingResults.length > 0) {
-            let requestsText = "<b>طلباتك قيد المراجعة أو المرفوضة:</b>\n\n";
-            for (const req of pendingResults) {
-                const statusEmoji = req.status === REQUEST_STATUS.PENDING ? '⏳' : '❌';
-                const statusText = req.status === REQUEST_STATUS.PENDING ? 'قيد المراجعة' : 'تم الرفض';
-                let typeText = '';
-                switch (req.type) {
-                    case REQUEST_TYPE.ADD: typeText = 'إضافة'; break;
-                    case REQUEST_TYPE.EDIT: typeText = 'تعديل'; break;
-                    case REQUEST_TYPE.DELETE: typeText = 'حذف'; break;
-                }
-                requestsText += `${statusEmoji} <b>${req.full_name}</b> (طلب ${typeText})\n   الحالة: ${statusText}\n\n`;
+        if (rejectedRequests && rejectedRequests.length > 0) {
+            await sendTelegramMessage(chatId, { text: "<b>طلباتك المرفوضة:</b>" }, env);
+            for (const req of rejectedRequests) {
+                let requestText = `❌ <b>${req.full_name}</b> (طلب ${req.type})\n   الحالة: تم الرفض`;
+                const inlineKeyboard = {
+                    inline_keyboard: [[
+                        { text: '🗑️ حذف', callback_data: `rejected_delete_${req.id}` }
+                    ]]
+                };
+                await sendTelegramMessage(chatId, { text: requestText, replyMarkup: inlineKeyboard }, env);
             }
-            await sendTelegramMessage(chatId, { text: requestsText }, env);
         }
 
-        if ((!approvedResults || approvedResults.length === 0) && (!pendingResults || pendingResults.length === 0)) {
+        if ((!pendingRequests || pendingRequests.length === 0) && (!rejectedRequests || rejectedRequests.length === 0)) {
              await sendTelegramMessage(chatId, {
-                text: "لا توجد طلبات مقدمة من قبلك حتى الآن",
+                text: "لا توجد طلبات قيد المراجعة أو مرفوضة.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
@@ -85,13 +100,13 @@ export async function showUserRequests(chatId, userId, env) {
     } catch (error) {
         console.error('Error showing user requests:', error);
         await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في عرض طلباتك",
+            text: "حدث خطأ في عرض طلباتك.",
             replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
 
-export async function startUploadProcess(chatId, userId, userInfo, env, originalRequest = null) {
+export async function startUploadProcess(chatId, userId, userInfo, env, originalRequest = null, isPendingEdit = false) {
     console.log(`Starting process for user ${userId}. Is editing: ${!!originalRequest}`);
     const isEditing = !!originalRequest;
 
@@ -110,6 +125,7 @@ export async function startUploadProcess(chatId, userId, userInfo, env, original
         userInfo: userInfo,
         editInfo: isEditing ? {
             isEditing: true,
+            isPendingEdit: isPendingEdit, // Flag for pending edits
             target_martyr_id: originalRequest.id
         } : { isEditing: false }
     };
@@ -158,7 +174,8 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
     const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`.trim();
 
     const isEditing = session.editInfo && session.editInfo.isEditing;
-    const requestType = isEditing ? REQUEST_TYPE.EDIT : REQUEST_TYPE.ADD;
+    const isPendingEdit = session.editInfo && session.editInfo.isPendingEdit;
+    const requestType = isEditing && !isPendingEdit ? REQUEST_TYPE.EDIT : REQUEST_TYPE.ADD;
     const targetId = isEditing ? session.editInfo.target_martyr_id : null;
     let imgbbUrl = null;
 
@@ -199,13 +216,18 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         userInfo: session.userInfo
     };
 
-    const requestId = await saveRequest(userId, requestData, env, requestType, targetId);
+    let requestId;
+    if (isPendingEdit) {
+        requestId = await updateRequest(targetId, requestData, env);
+    } else {
+        requestId = await saveRequest(userId, requestData, env, requestType, targetId);
+    }
 
     if (requestId) {
         await clearUserSession(userId, env);
 
-        const actionText = isEditing ? "تعديل" : "إضافة";
-        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\nسيتم مراجعة طلبك من قبل الإدارة.`;
+        const actionText = isPendingEdit ? "تحديث" : (isEditing ? "تعديل" : "إضافة");
+        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\n` + (isPendingEdit ? 'تم تحديث طلبك مباشرة.' : 'سيتم مراجعة طلبك من قبل الإدارة.');
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {

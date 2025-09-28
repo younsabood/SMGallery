@@ -164,10 +164,25 @@ export async function handlePhotoMessage(chatId, userId, photoData, caption = ''
 }
 
 export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
-    const [action, requestId] = callbackQuery.data.split('_');
+    const parts = callbackQuery.data.split('_');
+    const action = parts[0];
+    const actionType = parts.length > 2 ? `${parts[0]}_${parts[1]}` : action;
+    const requestId = parts.length > 2 ? parts[2] : parts[1];
 
     await answerCallbackQuery(callbackQuery.id, env, 'جاري معالجة طلبك...');
 
+    // Handle instant actions first
+    if (actionType === 'pending_delete' || actionType === 'rejected_delete') {
+        const success = await deleteRequest(requestId, env);
+        if (success) {
+            await sendTelegramMessage(chatId, { text: "تم حذف الطلب بنجاح." }, env);
+        } else {
+            await sendTelegramMessage(chatId, { text: "حدث خطأ أثناء حذف الطلب." }, env);
+        }
+        return;
+    }
+
+    // For other actions, fetch the original request
     const { results } = await env.DB.prepare('SELECT * FROM submission_requests WHERE id = ? AND user_id = ?').bind(requestId, userId).all();
 
     if (!results || results.length === 0) {
@@ -176,13 +191,6 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
     }
     const originalRequest = results[0];
 
-    // Check for existing pending requests
-    const existingPendingRequest = await getPendingRequestByTargetId(originalRequest.id, env);
-    if (existingPendingRequest) {
-        // Delete the existing pending request
-        await deleteRequest(existingPendingRequest.id, env);
-    }
-
     const userInfo = {
         telegram_id: callbackQuery.from.id,
         first_name: callbackQuery.from.first_name || '',
@@ -190,6 +198,20 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
         username: callbackQuery.from.username || ''
     };
 
+    if (actionType === 'pending_edit') {
+        // Start the upload process with the isPendingEdit flag set to true
+        await startUploadProcess(chatId, userId, userInfo, env, originalRequest, true);
+        return;
+    }
+
+    // Standard edit/delete for approved requests
+    // Check for existing pending requests on the same target
+    const existingPendingRequest = await getPendingRequestByTargetId(originalRequest.id, env);
+    if (existingPendingRequest) {
+        // Inform the user that there's already a pending request
+        await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
+        return;
+    }
 
     if (action === 'delete') {
         const success = await createDeleteRequest(userId, originalRequest, env);
@@ -199,6 +221,6 @@ export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
             await sendTelegramMessage(chatId, { text: "حدث خطأ أثناء إنشاء طلب الحذف." }, env);
         }
     } else if (action === 'edit') {
-        await startUploadProcess(chatId, userId, userInfo, originalRequest);
+        await startUploadProcess(chatId, userId, userInfo, env, originalRequest, false);
     }
 }

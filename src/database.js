@@ -202,3 +202,40 @@ export async function resetAllRequestCounts(env) {
     }
 }
 
+export async function updateRequest(requestId, requestData, env) {
+    try {
+        await env.DB.prepare(
+            `UPDATE submission_requests SET
+                full_name = ?,
+                name_first = ?,
+                name_father = ?,
+                name_family = ?,
+                age = ?,
+                date_birth = ?,
+                date_martyrdom = ?,
+                place = ?,
+                image_url = ?,
+                updated_at = ?
+            WHERE id = ?`
+        ).bind(
+            requestData.martyrData.full_name,
+            requestData.martyrData.name_first,
+            requestData.martyrData.name_father,
+            requestData.martyrData.name_family,
+            requestData.martyrData.age,
+            requestData.martyrData.date_birth,
+            requestData.martyrData.date_martyrdom,
+            requestData.martyrData.place,
+            requestData.martyrData.imageUrl,
+            new Date().toISOString(),
+            requestId
+        ).run();
+
+        console.log(`Request updated for ID: ${requestId}`);
+        return requestId; // Return the ID on success
+    } catch (error) {
+        console.error(`Error updating request:`, error.message);
+        return null;
+    }
+}
+
