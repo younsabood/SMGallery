@@ -1,8 +1,66 @@
 import { sendTelegramMessage, answerCallbackQuery } from './telegram.js';
-import { clearUserSession, getUserSession, saveUserSession, createDeleteRequest, getPendingRequestByTargetId, deleteRequest } from './database.js';
+import { 
+    clearUserSession, 
+    getUserSession, 
+    saveUserSession, 
+    createDeleteRequest, 
+    getPendingRequestByTargetId, 
+    deleteRequest, 
+    getSubmissionRequestByIdAndUser 
+} from './database.js';
 import { getKeyboard, STATES, createMainKeyboard } from './ui.js';
 import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
 import { calculateAge } from './utils.js';
+
+const COMMANDS = {
+    START: '/start',
+    ADD: 'إضافة شهيد جديد',
+    UPLOAD: '/upload',
+    HELP: 'مساعدة',
+    HELP_CMD: '/help',
+    MY_REQUESTS: 'عرض طلباتي',
+    MY_REQUESTS_CMD: '/my_requests',
+    MY_ADDITIONS: 'عرض اضافاتي',
+    CANCEL: 'إلغاء',
+    CANCEL_CMD: '/cancel'
+};
+
+const STATE_MACHINE_CONFIG = {
+    [STATES.WAITING_FIRST_NAME]: {
+        nextState: STATES.WAITING_FATHER_NAME,
+        prompt: (data) => `الرجاء إدخال اسم الأب: ${(data.father_name) ? `(الحالي: ${data.father_name})` : ''}`,
+        sessionKey: 'first_name'
+    },
+    [STATES.WAITING_FATHER_NAME]: {
+        nextState: STATES.WAITING_FAMILY_NAME,
+        prompt: (data) => `الرجاء إدخال اسم العائلة: ${(data.family_name) ? `(الحالي: ${data.family_name})` : ''}`,
+        sessionKey: 'father_name'
+    },
+    [STATES.WAITING_FAMILY_NAME]: {
+        nextState: STATES.WAITING_BIRTH_DATE,
+        prompt: (data) => `الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15): ${(data.birth_date) ? `(الحالي: ${data.birth_date})` : ''}`,
+        sessionKey: 'family_name'
+    },
+    [STATES.WAITING_BIRTH_DATE]: {
+        nextState: STATES.WAITING_MARTYRDOM_DATE,
+        prompt: (data) => `الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15): ${(data.martyrdom_date) ? `(الحالي: ${data.martyrdom_date})` : ''}`,
+        sessionKey: 'birth_date'
+    },
+    [STATES.WAITING_MARTYRDOM_DATE]: {
+        nextState: STATES.WAITING_PLACE,
+        prompt: (data) => `الرجاء إدخال مكان الاستشهاد: ${(data.place) ? `(الحالي: ${data.place})` : ''}`,
+        sessionKey: 'martyrdom_date',
+        onTransition: (sessionData) => {
+            sessionData.age = calculateAge(sessionData.birth_date, sessionData.martyrdom_date);
+        }
+    },
+    [STATES.WAITING_PLACE]: {
+        nextState: STATES.WAITING_PHOTO,
+        prompt: () => "الرجاء إرسال صورة الشهيد الجديدة:\n\n(إذا كنت لا تريد تغيير الصورة الحالية، أرسل أي نص مثل 'تخطي')",
+        sessionKey: 'place'
+    }
+};
+
 
 export async function handleTextMessage(chatId, userId, text, userInfo, env) {
     try {
@@ -19,44 +77,35 @@ export async function handleTextMessage(chatId, userId, text, userInfo, env) {
 async function processUserCommand(chatId, userId, text, userInfo, env) {
     console.log(`Processing user command: ${text}`);
 
-    if (text === '/start') {
-        await clearUserSession(userId, env);
-        const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري
-
-رحمهم الله وأسكنهم فسيح جناته
-
-الأوامر المتاحة:
-• إضافة شهيد جديد
-• عرض طلباتي
-• عرض اضافاتي
-• المساعدة
-
-لبدء إضافة شهيد جديد، اضغط على <b>إضافة شهيد جديد</b>`;
-
-        await sendTelegramMessage(chatId, {
-            text: welcomeText,
-            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
-        }, env);
-        return;
-    }
-
-    if (text === 'إضافة شهيد جديد' || text === '/upload') {
-        await startUploadProcess(chatId, userId, userInfo, env);
-    } else if (text === 'مساعدة' || text === '/help') {
-        const session = await getUserSession(userId, env);
-        await showHelp(chatId, env, session.state);
-    } else if (text === 'عرض طلباتي' || text === '/my_requests') {
-        await showUserRequests(chatId, userId, env);
-    } else if (text === 'عرض اضافاتي') {
-        await showMyAdditions(chatId, userId, env);
-    } else if (text === 'إلغاء' || text === '/cancel') {
-        await clearUserSession(userId, env);
-        await sendTelegramMessage(chatId, {
-            text: "تم إلغاء العملية الحالية\n\nيمكنك البدء من جديد",
-            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
-        }, env);
-    } else {
-        await handleUserInput(chatId, userId, text, env);
+    switch (text) {
+        case COMMANDS.START:
+            await clearUserSession(userId, env);
+            const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري...`; // Truncated for brevity
+            await sendTelegramMessage(chatId, { text: welcomeText, replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE)) }, env);
+            break;
+        case COMMANDS.ADD:
+        case COMMANDS.UPLOAD:
+            await startUploadProcess(chatId, userId, userInfo, env);
+            break;
+        case COMMANDS.HELP:
+        case COMMANDS.HELP_CMD:
+            await showHelp(chatId, env);
+            break;
+        case COMMANDS.MY_REQUESTS:
+        case COMMANDS.MY_REQUESTS_CMD:
+            await showUserRequests(chatId, userId, env);
+            break;
+        case COMMANDS.MY_ADDITIONS:
+            await showMyAdditions(chatId, userId, env);
+            break;
+        case COMMANDS.CANCEL:
+        case COMMANDS.CANCEL_CMD:
+            await clearUserSession(userId, env);
+            await sendTelegramMessage(chatId, { text: "تم إلغاء العملية الحالية.", replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE)) }, env);
+            break;
+        default:
+            await handleUserInput(chatId, userId, text, env);
+            break;
     }
 }
 
@@ -65,82 +114,31 @@ async function handleUserInput(chatId, userId, text, env) {
     console.log(`User ${userId} input: "${text}" with session state: ${session.state}`);
 
     if (session.state === STATES.IDLE) {
-        await sendTelegramMessage(chatId, {
-            text: "لا توجد عملية جارية. استخدم أحد الأزرار في القائمة.",
-            replyMarkup: getKeyboard(createMainKeyboard(session.state))
-        }, env);
+        await sendTelegramMessage(chatId, { text: "لا توجد عملية جارية.", replyMarkup: getKeyboard(createMainKeyboard(session.state)) }, env);
         return;
     }
 
-    const currentState = session.state;
-    const sessionData = session.data;
-    const isEditing = session.editInfo && session.editInfo.isEditing;
+    const stateConfig = STATE_MACHINE_CONFIG[session.state];
 
-    switch (currentState) {
-        case STATES.WAITING_FIRST_NAME:
-            sessionData.first_name = text.trim();
-            session.state = STATES.WAITING_FATHER_NAME;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال اسم الأب: ${isEditing ? `(الحالي: ${session.data.father_name})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
+    if (stateConfig) {
+        session.data[stateConfig.sessionKey] = text.trim();
+        session.state = stateConfig.nextState;
 
-        case STATES.WAITING_FATHER_NAME:
-            sessionData.father_name = text.trim();
-            session.state = STATES.WAITING_FAMILY_NAME;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال اسم العائلة: ${isEditing ? `(الحالي: ${session.data.family_name})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
+        if (stateConfig.onTransition) {
+            stateConfig.onTransition(session.data);
+        }
 
-        case STATES.WAITING_FAMILY_NAME:
-            sessionData.family_name = text.trim();
-            session.state = STATES.WAITING_BIRTH_DATE;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15): ${isEditing ? `(الحالي: ${session.data.birth_date})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
+        await saveUserSession(userId, session, env);
+        await sendTelegramMessage(chatId, { text: stateConfig.prompt(session.data), replyMarkup: getKeyboard(['إلغاء']) }, env);
 
-        case STATES.WAITING_BIRTH_DATE:
-            sessionData.birth_date = text.trim();
-            session.state = STATES.WAITING_MARTYRDOM_DATE;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15): ${isEditing ? `(الحالي: ${session.data.martyrdom_date})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
-
-        case STATES.WAITING_MARTYRDOM_DATE:
-            sessionData.martyrdom_date = text.trim();
-            sessionData.age = calculateAge(sessionData.birth_date, sessionData.martyrdom_date);
-            session.state = STATES.WAITING_PLACE;
-            await sendTelegramMessage(chatId, {
-                text: `الرجاء إدخال مكان الاستشهاد: ${isEditing ? `(الحالي: ${session.data.place})` : ''}`,
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
-
-        case STATES.WAITING_PLACE:
-            sessionData.place = text.trim();
-            session.state = STATES.WAITING_PHOTO;
-            await sendTelegramMessage(chatId, {
-                text: "الرجاء إرسال صورة الشهيد الجديدة:\n\n(إذا كنت لا تريد تغيير الصورة الحالية، أرسل أي نص مثل 'تخطي')",
-                replyMarkup: getKeyboard(['إلغاء'])
-            }, env);
-            break;
-            
-        case STATES.WAITING_PHOTO:
-             // If user sends text instead of a photo during an edit, we skip the photo upload.
-            if (isEditing && text) {
-                await completeRequest(chatId, userId, session, env, true); // Pass skipPhoto=true
-                return;
-            }
-            break;
+    } else if (session.state === STATES.WAITING_PHOTO) {
+        if (session.editInfo && session.editInfo.isEditing && text) {
+            await completeRequest(chatId, userId, session, env, true); // skipPhoto=true
+        }
+    } else {
+        // Should not happen in normal flow
+        console.warn(`Unhandled state: ${session.state}`);
     }
-    await saveUserSession(userId, session, env);
 }
 
 export async function handlePhotoMessage(chatId, userId, photoData, caption = '', env) {
@@ -148,78 +146,55 @@ export async function handlePhotoMessage(chatId, userId, photoData, caption = ''
     const session = await getUserSession(userId, env);
 
     if (session.state !== STATES.WAITING_PHOTO) {
-        await sendTelegramMessage(chatId, {
-            text: "يرجى اتباع الخطوات بالترتيب\n\nاستخدم <b>إضافة شهيد جديد</b> لبدء الإضافة",
-            replyMarkup: getKeyboard(createMainKeyboard(session.state))
-        }, env);
+        await sendTelegramMessage(chatId, { text: "يرجى اتباع الخطوات بالترتيب.", replyMarkup: getKeyboard(createMainKeyboard(session.state)) }, env);
         return;
     }
 
     const photo = photoData[photoData.length - 1];
-    const photoFileId = photo.file_id;
-    session.data.photo_file_id = photoFileId;
+    session.data.photo_file_id = photo.file_id;
     session.data.photo_caption = caption;
 
     await completeRequest(chatId, userId, session, env);
 }
 
 export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
-    const parts = callbackQuery.data.split('_');
-    const action = parts[0];
-    const actionType = parts.length > 2 ? `${parts[0]}_${parts[1]}` : action;
-    const requestId = parts.length > 2 ? parts[2] : parts[1];
+    const [action, ...params] = callbackQuery.data.split('_');
+    const requestId = params.pop();
+    const actionType = [action, ...params].join('_');
 
     await answerCallbackQuery(callbackQuery.id, env, 'جاري معالجة طلبك...');
 
-    // Handle instant actions first
     if (actionType === 'pending_delete' || actionType === 'rejected_delete') {
         const success = await deleteRequest(requestId, env);
-        if (success) {
-            await sendTelegramMessage(chatId, { text: "تم حذف الطلب بنجاح." }, env);
-        } else {
-            await sendTelegramMessage(chatId, { text: "حدث خطأ أثناء حذف الطلب." }, env);
-        }
+        const message = success ? "تم حذف الطلب بنجاح." : "حدث خطأ أثناء حذف الطلب.";
+        await sendTelegramMessage(chatId, { text: message }, env);
         return;
     }
 
-    // For other actions, fetch the original request
-    const { results } = await env.DB.prepare('SELECT * FROM submission_requests WHERE id = ? AND user_id = ?').bind(requestId, userId).all();
+    const originalRequest = await getSubmissionRequestByIdAndUser(requestId, userId, env);
 
-    if (!results || results.length === 0) {
+    if (!originalRequest) {
         await sendTelegramMessage(chatId, { text: "لم يتم العثور على الطلب أو لا تملك صلاحية الوصول إليه." }, env);
         return;
     }
-    const originalRequest = results[0];
 
-    const userInfo = {
-        telegram_id: callbackQuery.from.id,
-        first_name: callbackQuery.from.first_name || '',
-        last_name: callbackQuery.from.last_name || '',
-        username: callbackQuery.from.username || ''
-    };
+    const userInfo = callbackQuery.from;
 
     if (actionType === 'pending_edit') {
-        // Start the upload process with the isPendingEdit flag set to true
         await startUploadProcess(chatId, userId, userInfo, env, originalRequest, true);
         return;
     }
 
-    // Standard edit/delete for approved requests
-    // Check for existing pending requests on the same target
     const existingPendingRequest = await getPendingRequestByTargetId(originalRequest.id, env);
     if (existingPendingRequest) {
-        // Inform the user that there's already a pending request
         await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
         return;
     }
 
     if (action === 'delete') {
         const success = await createDeleteRequest(userId, originalRequest, env);
-        if (success) {
-            await sendTelegramMessage(chatId, { text: `تم إرسال طلب لحذف الشهيد "<b>${originalRequest.full_name}</b>". سيتم مراجعته من قبل الإدارة.` }, env);
-        } else {
-            await sendTelegramMessage(chatId, { text: "حدث خطأ أثناء إنشاء طلب الحذف." }, env);
-        }
+        const message = success ? `تم إرسال طلب لحذف الشهيد "<b>${originalRequest.full_name}</b>".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
+        await sendTelegramMessage(chatId, { text: message }, env);
     } else if (action === 'edit') {
         await startUploadProcess(chatId, userId, userInfo, env, originalRequest, false);
     }

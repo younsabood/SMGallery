@@ -1,3 +1,5 @@
+import { sendTelegramMessage } from './telegram.js';
+
 export const STATES = {
     IDLE: 'idle',
     WAITING_FIRST_NAME: 'waiting_first_name',
@@ -29,7 +31,6 @@ export function createMainKeyboard(state) {
     ];
 
     if (state && state !== STATES.IDLE) {
-        // Find the row with 'مساعدة' and add 'إلغاء' to it
         const helpRow = layout.find(row => row.includes('مساعدة'));
         if (helpRow) {
             helpRow.push('إلغاء');
@@ -41,7 +42,6 @@ export function createMainKeyboard(state) {
 
 export function getKeyboard(layout) {
     if (!Array.isArray(layout) || !Array.isArray(layout[0])) {
-        // For backward compatibility, if a flat array is passed, create a single column layout
         layout = layout.map(btn => [btn]);
     }
     return {
@@ -49,4 +49,49 @@ export function getKeyboard(layout) {
         resize_keyboard: true,
         one_time_keyboard: false
     };
+}
+
+/**
+ * Sends a message for a single item, either as a photo with caption or as plain text.
+ * @param {number} chatId - The chat ID to send the message to.
+ * @param {object} item - The data item (e.g., martyr or request).
+ * @param {string} caption - The formatted text caption for the item.
+ * @param {object} inlineKeyboard - The inline keyboard markup.
+ * @param {object} env - The environment object.
+ */
+async function sendItemMessage(chatId, item, caption, inlineKeyboard, env) {
+    const message = {
+        replyMarkup: inlineKeyboard
+    };
+    if (item.image_url) {
+        message.photoId = item.image_url;
+        message.photoCaption = caption;
+    } else {
+        message.text = caption;
+    }
+    await sendTelegramMessage(chatId, message, env);
+}
+
+/**
+ * Displays a list of items (e.g., martyrs, requests) to the user in a structured format.
+ * @param {number} chatId - The user's chat ID.
+ * @param {object} env - The environment object.
+ * @param {Array<object>} items - The array of items to display.
+ * @param {string} title - The title to display before the list.
+ * @param {function} formatter - A function that takes an item and returns an object with { caption, inlineKeyboard }.
+ * @param {string} noItemsMessage - The message to send if the items array is empty.
+ */
+export async function displayItems(chatId, env, items, title, formatter, noItemsMessage) {
+    if (items && items.length > 0) {
+        await sendTelegramMessage(chatId, { text: title }, env);
+        for (const item of items) {
+            const { caption, inlineKeyboard } = formatter(item);
+            await sendItemMessage(chatId, item, caption, inlineKeyboard, env);
+        }
+    } else {
+        await sendTelegramMessage(chatId, {
+            text: noItemsMessage,
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+        }, env);
+    }
 }

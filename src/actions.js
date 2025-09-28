@@ -1,56 +1,104 @@
 import { sendTelegramMessage, uploadPhotoToImgbb } from './telegram.js';
-import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, createMainKeyboard } from './ui.js';
-import { saveUserSession, saveRequest, clearUserSession, deleteRequest, updateRequest } from './database.js';
+import { getKeyboard, REQUEST_STATUS, REQUEST_TYPE, STATES, createMainKeyboard, displayItems } from './ui.js';
+import { 
+    saveUserSession, 
+    saveRequest, 
+    clearUserSession, 
+    updateRequest, 
+    getUserAdditions, 
+    getUserRequestsByStatus, 
+    getSubmissionImageUrl 
+} from './database.js';
 
-export async function showMyAdditions(chatId, userId, env) {
-    try {
-        // Select from the final martyrs table as requested by the user
-        const { results: martyrs } = await env.DB.prepare(
-            "SELECT * FROM martyrs WHERE telegram_id = ? ORDER BY created_at DESC"
-        ).bind(userId).all();
-
-        if (martyrs && martyrs.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>الشهداء الذين أضفتهم:</b>" }, env);
-
-            for (const martyr of martyrs) {
-                const caption = `
+/**
+ * Formats a martyr record for display.
+ * @param {object} martyr - The martyr record from the database.
+ * @returns {{caption: string, inlineKeyboard: object}} - The formatted caption and keyboard.
+ */
+function formatMartyr(martyr) {
+    const caption = `
 <b>الاسم الكامل:</b> ${martyr.full_name || 'غير متوفر'}
 <b>العمر عند الاستشهاد:</b> ${martyr.age || 'غير متوفر'}
 <b>تاريخ الولادة:</b> ${martyr.date_birth || 'غير متوفر'}
 <b>تاريخ الاستشهاد:</b> ${martyr.date_martyrdom || 'غير متوفر'}
 <b>مكان الاستشهاد:</b> ${martyr.place || 'غير متوفر'}
-                `.trim();
+    `.trim();
 
-                // Assuming martyr.id in the martyrs table corresponds to the original submission_requests.id
-                const submissionId = martyr.id;
-                let inlineKeyboard;
+    const inlineKeyboard = {
+        inline_keyboard: [[{
+            text: '✏️ تعديل',
+            callback_data: `edit_${martyr.id}`
+        }, {
+            text: '🗑️ حذف',
+            callback_data: `delete_${martyr.id}`
+        }]]
+    };
 
-                if (submissionId) {
-                    inlineKeyboard = {
-                        inline_keyboard: [[
-                            { text: '✏️ تعديل', callback_data: `edit_${submissionId}` },
-                            { text: '🗑️ حذف', callback_data: `delete_${submissionId}` }
-                        ]]
-                    };
-                }
+    return { caption, inlineKeyboard };
+}
 
-                if (martyr.image_url) {
-                    await sendTelegramMessage(chatId, {
-                        photoId: martyr.image_url,
-                        photoCaption: caption,
-                        replyMarkup: inlineKeyboard
-                    }, env);
-                } else {
-                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
-                }
-            }
-        } else {
-             await sendTelegramMessage(chatId, {
-                text: "لم تقم بإضافة أي شهيد حتى الآن.",
-                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
-            }, env);
-        }
+/**
+ * Formats a pending submission request for display.
+ * @param {object} req - The request record from the database.
+ * @returns {{caption: string, inlineKeyboard: object}} - The formatted caption and keyboard.
+ */
+function formatPendingRequest(req) {
+    const caption = `
+⏳ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+<b>الحالة:</b> قيد المراجعة
+    `.trim();
 
+    const inlineKeyboard = {
+        inline_keyboard: [[{
+            text: '✏️ تعديل',
+            callback_data: `pending_edit_${req.id}`
+        }, {
+            text: '🗑️ حذف',
+            callback_data: `pending_delete_${req.id}`
+        }]]
+    };
+
+    return { caption, inlineKeyboard };
+}
+
+/**
+ * Formats a rejected submission request for display.
+ * @param {object} req - The request record from the database.
+ * @returns {{caption: string, inlineKeyboard: object}} - The formatted caption and keyboard.
+ */
+function formatRejectedRequest(req) {
+    const caption = `
+❌ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
+<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
+<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
+<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
+<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
+<b>الحالة:</b> تم الرفض
+    `.trim();
+
+    const inlineKeyboard = {
+        inline_keyboard: [[{
+            text: '🗑️ حذف',
+            callback_data: `rejected_delete_${req.id}`
+        }]]
+    };
+
+    return { caption, inlineKeyboard };
+}
+
+export async function showMyAdditions(chatId, userId, env) {
+    try {
+        const martyrs = await getUserAdditions(userId, env);
+        await displayItems(
+            chatId, env, martyrs, 
+            '<b>الشهداء الذين أضفتهم:</b>',
+            formatMartyr, 
+            'لم تقم بإضافة أي شهيد حتى الآن.'
+        );
     } catch (error) {
         console.error('Error showing user additions:', error);
         await sendTelegramMessage(chatId, {
@@ -62,74 +110,26 @@ export async function showMyAdditions(chatId, userId, env) {
 
 export async function showUserRequests(chatId, userId, env) {
     try {
-        const { results: pendingRequests } = await env.DB.prepare(
-            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
-        ).bind(userId, REQUEST_STATUS.PENDING).all();
+        const pendingRequests = await getUserRequestsByStatus(userId, REQUEST_STATUS.PENDING, env);
+        const rejectedRequests = await getUserRequestsByStatus(userId, REQUEST_STATUS.REJECTED, env);
 
-        if (pendingRequests && pendingRequests.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>طلباتك قيد المراجعة:</b>" }, env);
-            for (const req of pendingRequests) {
-                const caption = `
-⏳ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
-<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
-<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
-<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
-<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
-<b>الحالة:</b> قيد المراجعة
-                `.trim();
-                const inlineKeyboard = {
-                    inline_keyboard: [[
-                        { text: '✏️ تعديل', callback_data: `pending_edit_${req.id}` },
-                        { text: '🗑️ حذف', callback_data: `pending_delete_${req.id}` }
-                    ]]
-                };
-                if (req.image_url) {
-                    await sendTelegramMessage(chatId, {
-                        photoId: req.image_url,
-                        photoCaption: caption,
-                        replyMarkup: inlineKeyboard
-                    }, env);
-                } else {
-                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
-                }
-            }
-        }
+        await displayItems(
+            chatId, env, pendingRequests, 
+            '<b>طلباتك قيد المراجعة:</b>',
+            formatPendingRequest, 
+            'لا توجد طلبات قيد المراجعة.'
+        );
 
-        const { results: rejectedRequests } = await env.DB.prepare(
-            "SELECT * FROM submission_requests WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
-        ).bind(userId, REQUEST_STATUS.REJECTED).all();
+        await displayItems(
+            chatId, env, rejectedRequests, 
+            '<b>طلباتك المرفوضة:</b>',
+            formatRejectedRequest, 
+            'لا توجد طلبات مرفوضة.'
+        );
 
-        if (rejectedRequests && rejectedRequests.length > 0) {
-            await sendTelegramMessage(chatId, { text: "<b>طلباتك المرفوضة:</b>" }, env);
-            for (const req of rejectedRequests) {
-                const caption = `
-❌ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
-<b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
-<b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
-<b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
-<b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
-<b>الحالة:</b> تم الرفض
-                `.trim();
-                const inlineKeyboard = {
-                    inline_keyboard: [[
-                        { text: '🗑️ حذف', callback_data: `rejected_delete_${req.id}` }
-                    ]]
-                };
-                if (req.image_url) {
-                    await sendTelegramMessage(chatId, {
-                        photoId: req.image_url,
-                        photoCaption: caption,
-                        replyMarkup: inlineKeyboard
-                    }, env);
-                } else {
-                    await sendTelegramMessage(chatId, { text: caption, replyMarkup: inlineKeyboard }, env);
-                }
-            }
-        }
-
-        if ((!pendingRequests || pendingRequests.length === 0) && (!rejectedRequests || rejectedRequests.length === 0)) {
-             await sendTelegramMessage(chatId, {
-                text: "لا توجد طلبات قيد المراجعة أو مرفوضة.",
+        if (pendingRequests.length === 0 && rejectedRequests.length === 0) {
+            await sendTelegramMessage(chatId, {
+                text: "لا توجد لديك أي طلبات.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
         }
@@ -224,11 +224,7 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
             return;
         }
     } else if (isEditing && skipPhoto) {
-        // If editing and skipping photo, keep the old image URL
-        const { results } = await env.DB.prepare('SELECT image_url FROM submission_requests WHERE id = ?').bind(targetId).all();
-        if (results && results.length > 0) {
-            imgbbUrl = results[0].image_url;
-        }
+        imgbbUrl = await getSubmissionImageUrl(targetId, env);
     }
     
     if (isEditing && !imgbbUrl) {
@@ -285,6 +281,3 @@ export async function completeRequest(chatId, userId, session, env, skipPhoto = 
         }, env);
     }
 }
-
-
-
