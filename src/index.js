@@ -1,6 +1,60 @@
-import { handleTextMessage, handlePhotoMessage, handleCallbackQuery } from './handlers.js';
-import { getUserRequestStatus, incrementRequestCount, blockUserForLimit, resetAllRequestCounts } from './database.js';
-import { sendTelegramMessage } from './telegram.js';
+import { getUserRequestStatus, incrementRequestCount, blockUserForLimit, resetAllRequestCounts, getUserSession } from './shared/database.js';
+import { sendTelegramMessage } from './shared/telegram.js';
+import { getKeyboard, createMainKeyboard, STATES } from './shared/ui.js';
+
+import { handleAddMartyr, handleMartyrInput, handleMartyrPhoto, handleMartyrCallback } from './features/addMartyr.js';
+import { handleShowMyRequests } from './features/showMyRequests.js';
+import { handleShowMyAdditions } from './features/showMyAdditions.js';
+import { handleHelp } from './features/help.js';
+import { handleCancel } from './features/cancel.js';
+
+const COMMANDS = {
+    START: '/start',
+    ADD: 'إضافة شهيد جديد',
+    HELP: 'مساعدة',
+    MY_REQUESTS: 'عرض طلباتي',
+    MY_ADDITIONS: 'عرض اضافاتي',
+    CANCEL: 'إلغاء',
+};
+
+async function handleTextMessage(chatId, userId, text, userInfo, env) {
+    const session = await getUserSession(userId, env);
+
+    if (session.state !== STATES.IDLE) {
+        await handleMartyrInput(chatId, userId, text, env);
+        return;
+    }
+
+    switch (text) {
+        case COMMANDS.START:
+            await sendTelegramMessage(chatId, {
+                text: "أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري...",
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+            }, env);
+            break;
+        case COMMANDS.ADD:
+            await handleAddMartyr(chatId, userId, userInfo, env);
+            break;
+        case COMMANDS.HELP:
+            await handleHelp(chatId, env);
+            break;
+        case COMMANDS.MY_REQUESTS:
+            await handleShowMyRequests(chatId, userId, env);
+            break;
+        case COMMANDS.MY_ADDITIONS:
+            await handleShowMyAdditions(chatId, userId, env);
+            break;
+        case COMMANDS.CANCEL:
+            await handleCancel(chatId, userId, env);
+            break;
+        default:
+            await sendTelegramMessage(chatId, {
+                text: "أمر غير معروف. الرجاء استخدام الأزرار.",
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+            }, env);
+            break;
+    }
+}
 
 // Main handler
 async function handleRequest(request, env) {
@@ -10,10 +64,27 @@ async function handleRequest(request, env) {
             console.log('Received update from Telegram');
 
             let userId;
+            let chatId;
+            let userInfo;
+
             if (update.message) {
                 userId = update.message.from.id.toString();
+                chatId = update.message.chat.id;
+                userInfo = {
+                    telegram_id: userId,
+                    first_name: update.message.from.first_name || '',
+                    last_name: update.message.from.last_name || '',
+                    username: update.message.from.username || ''
+                };
             } else if (update.callback_query) {
                 userId = update.callback_query.from.id.toString();
+                chatId = update.callback_query.message.chat.id;
+                userInfo = {
+                    telegram_id: userId,
+                    first_name: update.callback_query.from.first_name || '',
+                    last_name: update.callback_query.from.last_name || '',
+                    username: update.callback_query.from.username || ''
+                };
             }
 
             if (userId) {
@@ -33,29 +104,18 @@ async function handleRequest(request, env) {
             }
 
             if (update.message) {
-                const message = update.message;
-                const chatId = message.chat.id;
-                const userInfo = {
-                    telegram_id: userId,
-                    first_name: message.from.first_name || '',
-                    last_name: message.from.last_name || '',
-                    username: message.from.username || ''
-                };
-
-                if (message.text) {
-                    await handleTextMessage(chatId, userId, message.text, userInfo, env);
-                } else if (message.photo) {
-                    const caption = message.caption || '';
-                    await handlePhotoMessage(chatId, userId, message.photo, caption, env);
+                if (update.message.text) {
+                    await handleTextMessage(chatId, userId, update.message.text, userInfo, env);
+                } else if (update.message.photo) {
+                    const caption = update.message.caption || '';
+                    await handleMartyrPhoto(chatId, userId, update.message.photo, caption, env);
                 } else {
                     await sendTelegramMessage(chatId, {
                         text: "نوع الرسالة غير مدعوم. يرجى إرسال نص أو صورة فقط."
                     }, env);
                 }
             } else if (update.callback_query) {
-                const callbackQuery = update.callback_query;
-                const chatId = callbackQuery.message.chat.id;
-                await handleCallbackQuery(chatId, userId, callbackQuery, env);
+                await handleMartyrCallback(chatId, userId, update.callback_query, env);
             } else {
                 console.log('Received unsupported update type.');
             }

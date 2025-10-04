@@ -1,30 +1,19 @@
-import { sendTelegramMessage, answerCallbackQuery } from './telegram.js';
-import { 
-    clearUserSession, 
-    getUserSession, 
-    saveUserSession, 
-    createDeleteRequest, 
-    getPendingRequestByTargetId, 
-    deleteRequest, 
-    getSubmissionRequestByIdAndUser, 
-    getMartyrByIdAndUser 
-} from './database.js';
-import { getKeyboard, STATES, createMainKeyboard } from './ui.js';
-import { showUserRequests, startUploadProcess, showHelp, completeRequest, showMyAdditions } from './actions.js';
-import { calculateAge, parseDate } from './utils.js';
-
-const COMMANDS = {
-    START: '/start',
-    ADD: 'إضافة شهيد جديد',
-    UPLOAD: '/upload',
-    HELP: 'مساعدة',
-    HELP_CMD: '/help',
-    MY_REQUESTS: 'عرض طلباتي',
-    MY_REQUESTS_CMD: '/my_requests',
-    MY_ADDITIONS: 'عرض اضافاتي',
-    CANCEL: 'إلغاء',
-    CANCEL_CMD: '/cancel'
-};
+import { sendTelegramMessage, uploadPhotoToImgbb, answerCallbackQuery } from '../shared/telegram.js';
+import { getKeyboard, STATES, REQUEST_TYPE, createMainKeyboard } from '../shared/ui.js';
+import {
+    saveUserSession,
+    saveRequest,
+    clearUserSession,
+    updateRequest,
+    getSubmissionImageUrl,
+    getMartyrByIdAndUser,
+    getPendingRequestByTargetId,
+    createDeleteRequest,
+    getSubmissionRequestByIdAndUser,
+    deleteRequest,
+    getUserSession
+} from '../shared/database.js';
+import { calculateAge, parseDate } from '../shared/utils.js';
 
 const STATE_MACHINE_CONFIG = {
     [STATES.WAITING_FIRST_NAME]: {
@@ -62,60 +51,137 @@ const STATE_MACHINE_CONFIG = {
     }
 };
 
+async function startUploadProcess(chatId, userId, userInfo, env, originalRequest = null, isPendingEdit = false) {
+    console.log(`Starting process for user ${userId}. Is editing: ${!!originalRequest}`);
+    const isEditing = !!originalRequest;
 
-export async function handleTextMessage(chatId, userId, text, userInfo, env) {
-    try {
-        console.log(`Handling text message from user ${userId}: \"${text}\"`);
-        await processUserCommand(chatId, userId, text, userInfo, env);
-    } catch (error) {
-        console.error('Error in handleTextMessage:', error);
+    const sessionData = {
+        state: STATES.WAITING_FIRST_NAME,
+        data: isEditing ? {
+            first_name: originalRequest.name_first,
+            father_name: originalRequest.name_father,
+            family_name: originalRequest.name_family,
+            birth_date: originalRequest.date_birth,
+            martyrdom_date: originalRequest.date_martyrdom,
+            place: originalRequest.place,
+            photo_file_id: null,
+            photo_caption: '',
+        } : {},
+        userInfo: userInfo,
+        editInfo: isEditing ? {
+            isEditing: true,
+            isPendingEdit: isPendingEdit, // Flag for pending edits
+            target_martyr_id: originalRequest.id
+        } : { isEditing: false }
+    };
+
+    const isSessionSaved = await saveUserSession(userId, sessionData, env);
+    if (isSessionSaved) {
+        let initialPrompt;
+        if (isEditing) {
+            initialPrompt = `بدء تعديل بيانات الشهيد: <b>${originalRequest.full_name}</b>\n\nالرجاء إدخال الاسم الأول الجديد (الحالي: ${originalRequest.name_first}):`;
+        } else {
+            initialPrompt = "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:";
+        }
         await sendTelegramMessage(chatId, {
-            text: "حدث خطأ في معالجة رسالتك. يرجى المحاولة مرة أخرى."
+            text: initialPrompt,
+            replyMarkup: getKeyboard(['إلغاء'])
+        }, env);
+    } else {
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ، يرجى المحاولة مرة أخرى",
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
 }
 
-async function processUserCommand(chatId, userId, text, userInfo, env) {
-    console.log(`Processing user command: ${text}`);
+async function completeRequest(chatId, userId, session, env, skipPhoto = false) {
+    console.log(`Completing request for user ${userId}.`);
+    const martyrData = session.data;
+    const fullName = `${martyrData.first_name || ''} ${martyrData.father_name || ''} ${martyrData.family_name || ''}`.trim();
 
-    switch (text) {
-        case COMMANDS.START:
-            await clearUserSession(userId, env);
-            const welcomeText = `أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري...`; // Truncated for brevity
-            await sendTelegramMessage(chatId, { text: welcomeText, replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE)) }, env);
-            break;
-        case COMMANDS.ADD:
-        case COMMANDS.UPLOAD:
-            await startUploadProcess(chatId, userId, userInfo, env);
-            break;
-        case COMMANDS.HELP:
-        case COMMANDS.HELP_CMD:
-            await showHelp(chatId, env);
-            break;
-        case COMMANDS.MY_REQUESTS:
-        case COMMANDS.MY_REQUESTS_CMD:
-            await showUserRequests(chatId, userId, env);
-            break;
-        case COMMANDS.MY_ADDITIONS:
-            await showMyAdditions(chatId, userId, env);
-            break;
-        case COMMANDS.CANCEL:
-        case COMMANDS.CANCEL_CMD:
-            await clearUserSession(userId, env);
-            await sendTelegramMessage(chatId, { text: "تم إلغاء العملية الحالية.", replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE)) }, env);
-            break;
-        default:
-            await handleUserInput(chatId, userId, text, env);
-            break;
+    const isEditing = session.editInfo && session.editInfo.isEditing;
+    const isPendingEdit = session.editInfo && session.editInfo.isPendingEdit;
+    const requestType = isEditing && !isPendingEdit ? REQUEST_TYPE.EDIT : REQUEST_TYPE.ADD;
+    const targetId = isEditing ? session.editInfo.target_martyr_id : null;
+    let imgbbUrl = null;
+
+    if (!skipPhoto && martyrData.photo_file_id) {
+        await sendTelegramMessage(chatId, { text: "جاري تحميل الصورة، يرجى الانتظار..." }, env);
+        imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
+        if (!imgbbUrl) {
+            await sendTelegramMessage(chatId, { text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى." }, env);
+            return;
+        }
+    } else if (isEditing && skipPhoto) {
+        imgbbUrl = await getSubmissionImageUrl(targetId, env);
+    }
+
+    if (isEditing && !imgbbUrl) {
+        console.error(`Could not find original image for edit request on target ${targetId}`);
+         await sendTelegramMessage(chatId, { text: "حدث خطأ في العثور على الصورة الأصلية. يرجى إعادة المحاولة وإرفاق صورة." }, env);
+        return;
+    }
+
+
+    const requestData = {
+        martyrData: {
+            name_first: martyrData.first_name || '',
+            name_father: martyrData.father_name || '',
+            name_family: martyrData.family_name || '',
+            full_name: fullName,
+            age: martyrData.age || null,
+            date_birth: martyrData.birth_date || '',
+            date_martyrdom: martyrData.martyrdom_date || '',
+            place: martyrData.place || '',
+            imageUrl: imgbbUrl,
+        },
+        userInfo: session.userInfo
+    };
+
+    let requestId;
+    if (isPendingEdit) {
+        requestId = await updateRequest(targetId, requestData, env);
+    } else {
+        requestId = await saveRequest(userId, requestData, env, requestType, targetId);
+    }
+
+    if (requestId) {
+        await clearUserSession(userId, env);
+
+        const actionText = isPendingEdit ? "تحديث" : (isEditing ? "تعديل" : "إضافة");
+        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\n` + (isPendingEdit ? 'تم تحديث طلبك مباشرة.' : 'سيتم مراجعة طلبك من قبل الإدارة.');
+
+        if (!skipPhoto && martyrData.photo_file_id) {
+            await sendTelegramMessage(chatId, {
+                photoCaption: messageSummary,
+                photoId: martyrData.photo_file_id,
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+            }, env);
+        } else {
+            await sendTelegramMessage(chatId, {
+                text: messageSummary,
+                replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+            }, env);
+        }
+    } else {
+        await sendTelegramMessage(chatId, {
+            text: "حدث خطأ في حفظ الطلب، يرجى المحاولة مرة أخرى",
+            replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
+        }, env);
     }
 }
 
-async function handleUserInput(chatId, userId, text, env) {
+export async function handleAddMartyr(chatId, userId, userInfo, env) {
+    await startUploadProcess(chatId, userId, userInfo, env);
+}
+
+export async function handleMartyrInput(chatId, userId, text, env) {
     const session = await getUserSession(userId, env);
-    console.log(`User ${userId} input: "${text}" with session state: ${session.state}`);
+    console.log(`User ${userId} input: \"${text}\" with session state: ${session.state}`);
 
     if (session.state === STATES.IDLE) {
-        await sendTelegramMessage(chatId, { text: "لا توجد عملية جارية.", replyMarkup: getKeyboard(createMainKeyboard(session.state)) }, env);
+        // This should be handled in the main index.js router
         return;
     }
 
@@ -152,7 +218,7 @@ async function handleUserInput(chatId, userId, text, env) {
     }
 }
 
-export async function handlePhotoMessage(chatId, userId, photoData, caption = '', env) {
+export async function handleMartyrPhoto(chatId, userId, photoData, caption = '', env) {
     console.log(`Handling photo message from user ${userId}.`);
     const session = await getUserSession(userId, env);
 
@@ -168,7 +234,7 @@ export async function handlePhotoMessage(chatId, userId, photoData, caption = ''
     await completeRequest(chatId, userId, session, env);
 }
 
-export async function handleCallbackQuery(chatId, userId, callbackQuery, env) {
+export async function handleMartyrCallback(chatId, userId, callbackQuery, env) {
     const [action, ...params] = callbackQuery.data.split('_');
     const requestId = params.pop();
     const actionType = [action, ...params].join('_');
