@@ -28,20 +28,20 @@ const STATE_MACHINE_CONFIG = {
     },
     [STATES.WAITING_FAMILY_NAME]: {
         nextState: STATES.WAITING_BIRTH_DATE,
-        prompt: (data) => `الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15): ${(data.birth_date) ? `(الحالي: ${data.birth_date})` : ''}`,
+        prompt: (data) => `الرجاء إدخال تاريخ الولادة (مثال: 1990/01/15): ${(data.date_birth) ? `(الحالي: ${data.date_birth})` : ''}`,
         sessionKey: 'family_name'
     },
     [STATES.WAITING_BIRTH_DATE]: {
         nextState: STATES.WAITING_MARTYRDOM_DATE,
         prompt: (data) => `الرجاء إدخال تاريخ الاستشهاد (مثال: 2024/03/15): ${(data.martyrdom_date) ? `(الحالي: ${data.martyrdom_date})` : ''}`,
-        sessionKey: 'birth_date'
+        sessionKey: 'date_birth'
     },
     [STATES.WAITING_MARTYRDOM_DATE]: {
         nextState: STATES.WAITING_PLACE,
         prompt: (data) => `الرجاء إدخال مكان الاستشهاد: ${(data.place) ? `(الحالي: ${data.place})` : ''}`,
         sessionKey: 'martyrdom_date',
         onTransition: (sessionData) => {
-            sessionData.age = calculateAge(sessionData.birth_date, sessionData.martyrdom_date);
+            sessionData.age = calculateAge(sessionData.date_birth, sessionData.martyrdom_date);
         }
     },
     [STATES.WAITING_PLACE]: {
@@ -61,7 +61,7 @@ async function startUploadProcess(chatId, userId, userInfo, env, originalRequest
             first_name: originalRequest.name_first,
             father_name: originalRequest.name_father,
             family_name: originalRequest.name_family,
-            birth_date: originalRequest.date_birth,
+            date_birth: originalRequest.date_birth,
             martyrdom_date: originalRequest.date_martyrdom,
             place: originalRequest.place,
             photo_file_id: null,
@@ -149,7 +149,7 @@ async function completeRequest(chatId, userId, session, env, skipPhoto = false) 
         await clearUserSession(userId, env);
 
         const actionText = isPendingEdit ? "تحديث" : (isEditing ? "تعديل" : "إضافة");
-        const messageSummary = `<b>شكراً لمساهمتك.</b>\nتم استلام طلب ${actionText} بنجاح وسيتم مراجعته من قبل الإدارة.\n\n<b>ملخص البيانات:</b>\n<b>الاسم:</b> ${fullName}\n<b>العمر عند الاستشهاد:</b> ${martyrData.age || 'غير متوفر'}\n<b>تاريخ الولادة:</b> ${martyrData.birth_date || 'غير متوفر'}\n<b>تاريخ الاستشهاد:</b> ${martyrData.martyrdom_date || 'غير متوفر'}\n<b>مكان الاستشهاد:</b> ${martyrData.place || 'غير متوفر'}`;
+        const messageSummary = `<b>شكراً لمساهمتك.</b>\nتم استلام طلب ${actionText} بنجاح وسيتم مراجعته من قبل الإدارة.\n\n<b>ملخص البيانات:</b>\n<b>الاسم:</b> ${fullName}\n<b>العمر عند الاستشهاد:</b> ${martyrData.age || 'غير متوفر'}\n<b>تاريخ الولادة:</b> ${martyrData.date_birth || 'غير متوفر'}\n<b>تاريخ الاستشهاد:</b> ${martyrData.martyrdom_date || 'غير متوفر'}\n<b>مكان الاستشهاد:</b> ${martyrData.place || 'غير متوفر'}`;
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {
