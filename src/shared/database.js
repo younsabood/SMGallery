@@ -1,17 +1,6 @@
 import { generateRequestId } from './utils.js';
 import { REQUEST_STATUS, REQUEST_TYPE, STATES } from './ui.js';
 
-/**
- * Executes a database query with specified parameters and method.
- * This centralizes query execution, error handling, and logging.
- *
- * @param {object} db - The D1 database instance (e.g., env.DB).
- * @param {string} query - The SQL query string to execute.
- * @param {Array<any>} params - An array of parameters to bind to the query.
- * @param {string} [method='run'] - The execution method ('run', 'first', 'all').
- * @param {string} [errorMessage='Error executing query'] - A specific error message for logging.
- * @returns {Promise<any>} The result of the query or null/false on error.
- */
 async function executeQuery(db, query, params, method = 'run', errorMessage = 'Error executing query') {
     try {
         const stmt = db.prepare(query).bind(...params);
@@ -28,14 +17,17 @@ async function executeQuery(db, query, params, method = 'run', errorMessage = 'E
 }
 
 export async function saveUserSession(userId, sessionData, env) {
-    const query = 'INSERT OR REPLACE INTO sessions (user_id, state, data, user_info, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)';
+    const query = 'INSERT OR REPLACE INTO sessions (user_id, state, data, user_info, UserName, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    const now = new Date().toISOString();
+    const userInfo = sessionData.userInfo || {};
     const params = [
         userId,
         sessionData.state,
         JSON.stringify(sessionData),
-        JSON.stringify(sessionData.userInfo),
-        new Date().toISOString(),
-        new Date().toISOString()
+        JSON.stringify(userInfo),
+        userInfo.username || '',
+        now,
+        now
     ];
     return executeQuery(env.DB, query, params, 'run', `Error saving session for user ${userId}`);
 }
@@ -50,7 +42,7 @@ export async function getUserSession(userId, env) {
         return session;
     }
 
-    console.log(`No session found for user ${userId}.`);
+    console.log(`No session found for user ${userId}. Creating a new one.`);
     return {
         state: STATES.IDLE,
         data: {},
@@ -75,11 +67,13 @@ export async function getPendingRequestByTargetId(targetMartyrId, env) {
 }
 
 export async function saveRequest(userId, requestData, env, type = REQUEST_TYPE.ADD, targetId = null) {
-    const query = `INSERT INTO submission_requests (id, user_id, full_name, name_first, name_father, name_family, age, date_birth, date_martyrdom, place, image_url, status, type, target_martyr_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const query = `INSERT INTO submission_requests (id, user_id, UserName, full_name, name_first, name_father, name_family, age, date_birth, date_martyrdom, place, image_url, status, type, target_martyr_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const userInfo = requestData.userInfo || {};
     const params = [
         generateRequestId(),
         userId,
+        userInfo.username || '',
         requestData.martyrData.full_name,
         requestData.martyrData.name_first,
         requestData.martyrData.name_father,
@@ -95,15 +89,17 @@ export async function saveRequest(userId, requestData, env, type = REQUEST_TYPE.
         new Date().toISOString()
     ];
     const result = await executeQuery(env.DB, query, params, 'run', 'Error saving request');
-    return result ? result.meta.last_row_id : null;
+    return result ? params[0] : null; // Return the generated ID
 }
 
-export async function createDeleteRequest(userId, originalRequest, env) {
-    const query = `INSERT INTO submission_requests (id, user_id, full_name, name_first, name_father, name_family, age, date_birth, date_martyrdom, place, image_url, status, type, target_martyr_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+export async function createDeleteRequest(userId, originalRequest, env, userInfo) {
+    const query = `INSERT INTO submission_requests (id, user_id, UserName, full_name, name_first, name_father, name_family, age, date_birth, date_martyrdom, place, image_url, status, type, target_martyr_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const params = [
         generateRequestId(),
         userId,
+        userInfo.username || '',
         originalRequest.full_name,
         originalRequest.name_first,
         originalRequest.name_father,
@@ -196,13 +192,6 @@ export async function getSubmissionImageUrl(submissionId, env) {
     return result ? result.image_url : null;
 }
 
-/**
- * Fetches a specific submission request by its ID and the user who created it.
- * @param {string} requestId - The ID of the request.
- * @param {number} userId - The user's Telegram ID.
- * @param {object} env - The environment object.
- * @returns {Promise<object|null>} The request object or null if not found.
- */
 export async function getSubmissionRequestByIdAndUser(requestId, userId, env) {
     const query = "SELECT * FROM submission_requests WHERE id = ? AND user_id = ?";
     return executeQuery(env.DB, query, [requestId, userId], 'first', 'Error fetching submission request by ID and user');
@@ -212,3 +201,4 @@ export async function getMartyrByIdAndUser(martyrId, userId, env) {
     const query = "SELECT * FROM martyrs WHERE id = ? AND telegram_id = ?";
     return executeQuery(env.DB, query, [martyrId, userId], 'first', 'Error fetching martyr by ID and user');
 }
+

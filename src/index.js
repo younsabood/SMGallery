@@ -18,6 +18,7 @@ const COMMANDS = {
 };
 
 async function handleTextMessage(chatId, userId, text, userInfo, env) {
+    // Check for cancel command first
     if (text === COMMANDS.CANCEL) {
         await handleCancel(chatId, userId, env);
         return;
@@ -25,15 +26,17 @@ async function handleTextMessage(chatId, userId, text, userInfo, env) {
 
     const session = await getUserSession(userId, env);
 
+    // If user is in the middle of a process
     if (session.state !== STATES.IDLE) {
         await handleMartyrInput(chatId, userId, text, env);
         return;
     }
 
+    // Handle main menu commands
     switch (text) {
         case COMMANDS.START:
             await sendTelegramMessage(chatId, {
-                text: "أهلاً وسهلاً بك في بوت معرض شهداء الساحل السوري...",
+                text: "<b>أهلاً بك في بوت معرض شهداء الساحل السوري.</b>\n\nيمكنك من خلال هذا البوت المساهمة في توثيق قصص شهدائنا الأبرار. اختر أحد الخيارات من القائمة للبدء.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
             break;
@@ -51,7 +54,7 @@ async function handleTextMessage(chatId, userId, text, userInfo, env) {
             break;
         default:
             await sendTelegramMessage(chatId, {
-                text: "أمر غير معروف. الرجاء استخدام الأزرار.",
+                text: "لم أتعرف على هذا الأمر. يرجى استخدام الأزرار في القائمة.",
                 replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
             }, env);
             break;
@@ -69,6 +72,7 @@ async function handleRequest(request, env) {
             let chatId;
             let userInfo;
 
+            // Extract user info from message or callback query
             if (update.message) {
                 userId = update.message.from.id.toString();
                 chatId = update.message.chat.id;
@@ -90,13 +94,14 @@ async function handleRequest(request, env) {
             }
 
             if (userId) {
+                // Check if user is blocked
                 const userStatus = await getUserRequestStatus(userId, env);
-
                 if (userStatus.is_block) {
                     console.log(`User ${userId} is blocked. Ignoring update.`);
                     return new Response(JSON.stringify({ status: 'ok' }), { status: 200 });
                 }
 
+                // Rate limiting
                 const newRequestCount = await incrementRequestCount(userId, env);
                 if (newRequestCount > 200) {
                     await blockUserForLimit(userId, env);
@@ -105,6 +110,7 @@ async function handleRequest(request, env) {
                 }
             }
 
+            // Route update to the appropriate handler
             if (update.message) {
                 if (update.message.text) {
                     await handleTextMessage(chatId, userId, update.message.text, userInfo, env);
@@ -135,7 +141,7 @@ async function handleRequest(request, env) {
     } else if (request.method === 'GET') {
         return new Response(JSON.stringify({
             "status": "ok",
-            "message": "Syrian Martyrs Bot is running on Cloudflare Workers!",
+            "message": "Syrian Martyrs Bot is running!",
             "platform": "Cloudflare Workers"
         }), { status: 200 });
     }
@@ -153,3 +159,4 @@ export default {
         await resetAllRequestCounts(env);
     }
 };
+

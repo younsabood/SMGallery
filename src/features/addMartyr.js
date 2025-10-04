@@ -23,7 +23,7 @@ const STATE_MACHINE_CONFIG = {
     },
     [STATES.WAITING_FATHER_NAME]: {
         nextState: STATES.WAITING_FAMILY_NAME,
-        prompt: (data) => `الرجاء إدخال اسم العائلة: ${(data.family_name) ? `(الحالي: ${data.family_name})` : ''}`,
+        prompt: (data) => `الرجاء إدخال الكنية (اسم العائلة): ${(data.family_name) ? `(الحالي: ${data.family_name})` : ''}`,
         sessionKey: 'father_name'
     },
     [STATES.WAITING_FAMILY_NAME]: {
@@ -46,7 +46,7 @@ const STATE_MACHINE_CONFIG = {
     },
     [STATES.WAITING_PLACE]: {
         nextState: STATES.WAITING_PHOTO,
-        prompt: () => "الرجاء إرسال صورة الشهيد الجديدة:\n\n(إذا كنت لا تريد تغيير الصورة الحالية، أرسل أي نص مثل 'تخطي')",
+        prompt: () => "الخطوة الأخيرة: الرجاء إرسال صورة واضحة للشهيد.\n\n(في حال التعديل، إذا كنت لا تريد تغيير الصورة الحالية، أرسل أي نص مثل 'تخطي')",
         sessionKey: 'place'
     }
 };
@@ -70,7 +70,7 @@ async function startUploadProcess(chatId, userId, userInfo, env, originalRequest
         userInfo: userInfo,
         editInfo: isEditing ? {
             isEditing: true,
-            isPendingEdit: isPendingEdit, // Flag for pending edits
+            isPendingEdit: isPendingEdit,
             target_martyr_id: originalRequest.id
         } : { isEditing: false }
     };
@@ -79,9 +79,9 @@ async function startUploadProcess(chatId, userId, userInfo, env, originalRequest
     if (isSessionSaved) {
         let initialPrompt;
         if (isEditing) {
-            initialPrompt = `بدء تعديل بيانات الشهيد: <b>${originalRequest.full_name}</b>\n\nالرجاء إدخال الاسم الأول الجديد (الحالي: ${originalRequest.name_first}):`;
+            initialPrompt = `<b>بدء تعديل بيانات الشهيد:</b> ${originalRequest.full_name}\n\nيرجى إدخال الاسم الأول الجديد (الحالي: ${originalRequest.name_first}):`;
         } else {
-            initialPrompt = "لنبدأ بإضافة شهيد جديد\n\nالرجاء إدخال الاسم الأول:";
+            initialPrompt = "<b>بدء عملية إضافة شهيد جديد</b>\n\nالرجاء إدخال الاسم الأول للشهيد:";
         }
         await sendTelegramMessage(chatId, {
             text: initialPrompt,
@@ -89,7 +89,7 @@ async function startUploadProcess(chatId, userId, userInfo, env, originalRequest
         }, env);
     } else {
         await sendTelegramMessage(chatId, {
-            text: "حدث خطأ، يرجى المحاولة مرة أخرى",
+            text: "حدث خطأ في بدء العملية. يرجى المحاولة مرة أخرى.",
             replyMarkup: getKeyboard(createMainKeyboard(STATES.IDLE))
         }, env);
     }
@@ -107,10 +107,10 @@ async function completeRequest(chatId, userId, session, env, skipPhoto = false) 
     let imgbbUrl = null;
 
     if (!skipPhoto && martyrData.photo_file_id) {
-        await sendTelegramMessage(chatId, { text: "جاري تحميل الصورة، يرجى الانتظار..." }, env);
+        await sendTelegramMessage(chatId, { text: "جاري رفع الصورة، قد يستغرق الأمر بعض الوقت..." }, env);
         imgbbUrl = await uploadPhotoToImgbb(martyrData.photo_file_id, env);
         if (!imgbbUrl) {
-            await sendTelegramMessage(chatId, { text: "حدث خطأ في تحميل الصورة. يرجى المحاولة مرة أخرى." }, env);
+            await sendTelegramMessage(chatId, { text: "حدث خطأ في رفع الصورة. يرجى المحاولة مرة أخرى لاحقاً." }, env);
             return;
         }
     } else if (isEditing && skipPhoto) {
@@ -119,10 +119,9 @@ async function completeRequest(chatId, userId, session, env, skipPhoto = false) 
 
     if (isEditing && !imgbbUrl) {
         console.error(`Could not find original image for edit request on target ${targetId}`);
-         await sendTelegramMessage(chatId, { text: "حدث خطأ في العثور على الصورة الأصلية. يرجى إعادة المحاولة وإرفاق صورة." }, env);
+         await sendTelegramMessage(chatId, { text: "لم يتم العثور على الصورة الأصلية. يرجى إعادة محاولة التعديل وإرفاق صورة." }, env);
         return;
     }
-
 
     const requestData = {
         martyrData: {
@@ -131,7 +130,7 @@ async function completeRequest(chatId, userId, session, env, skipPhoto = false) 
             name_family: martyrData.family_name || '',
             full_name: fullName,
             age: martyrData.age || null,
-            date_birth: martyrData.birth_date || '',
+            date_birth: martyrData.date_birth || '',
             date_martyrdom: martyrData.martyrdom_date || '',
             place: martyrData.place || '',
             imageUrl: imgbbUrl,
@@ -150,7 +149,7 @@ async function completeRequest(chatId, userId, session, env, skipPhoto = false) 
         await clearUserSession(userId, env);
 
         const actionText = isPendingEdit ? "تحديث" : (isEditing ? "تعديل" : "إضافة");
-        const messageSummary = `تم إرسال طلب ${actionText} بنجاح!\n\n<b>ملخص البيانات:</b>\nالاسم: ${fullName}\nالعمر: ${martyrData.age || 'غير متوفر'}\nالولادة: ${martyrData.birth_date || 'غير متوفر'}\nالاستشهاد: ${martyrData.martyrdom_date || 'غير متوفر'}\nالمكان: ${martyrData.place || 'غير متوفر'}\n\n` + (isPendingEdit ? 'تم تحديث طلبك مباشرة.' : 'سيتم مراجعة طلبك من قبل الإدارة.');
+        const messageSummary = `<b>شكراً لمساهمتك.</b>\nتم استلام طلب ${actionText} بنجاح وسيتم مراجعته من قبل الإدارة.\n\n<b>ملخص البيانات:</b>\n<b>الاسم:</b> ${fullName}\n<b>العمر عند الاستشهاد:</b> ${martyrData.age || 'غير متوفر'}\n<b>تاريخ الولادة:</b> ${martyrData.birth_date || 'غير متوفر'}\n<b>تاريخ الاستشهاد:</b> ${martyrData.martyrdom_date || 'غير متوفر'}\n<b>مكان الاستشهاد:</b> ${martyrData.place || 'غير متوفر'}`;
 
         if (!skipPhoto && martyrData.photo_file_id) {
             await sendTelegramMessage(chatId, {
@@ -178,23 +177,19 @@ export async function handleAddMartyr(chatId, userId, userInfo, env) {
 
 export async function handleMartyrInput(chatId, userId, text, env) {
     const session = await getUserSession(userId, env);
-    console.log(`User ${userId} input: \"${text}\" with session state: ${session.state}`);
-
-    if (session.state === STATES.IDLE) {
-        // This should be handled in the main index.js router
+    if (!session || session.state === STATES.IDLE) {
         return;
     }
+    console.log(`User ${userId} input: \"${text}\" with session state: ${session.state}`);
 
     const stateConfig = STATE_MACHINE_CONFIG[session.state];
-
     if (stateConfig) {
         const trimmedText = text.trim();
 
         if (session.state === STATES.WAITING_BIRTH_DATE || session.state === STATES.WAITING_MARTYRDOM_DATE) {
-            const parsedDate = parseDate(trimmedText);
-            if (!parsedDate) {
-                await sendTelegramMessage(chatId, { text: "التنسيق غير صالح. الرجاء إدخال التاريخ بالتنسيق الصحيح (مثال: 1990/01/15)", replyMarkup: getKeyboard(['إلغاء']) }, env);
-                return; // Stay in the same state
+            if (!parseDate(trimmedText)) {
+                await sendTelegramMessage(chatId, { text: "التنسيق غير صالح. يرجى إدخال التاريخ بالتنسيق الصحيح (مثال: 1990/01/15)", replyMarkup: getKeyboard(['إلغاء']) }, env);
+                return;
             }
         }
 
@@ -207,22 +202,18 @@ export async function handleMartyrInput(chatId, userId, text, env) {
 
         await saveUserSession(userId, session, env);
         await sendTelegramMessage(chatId, { text: stateConfig.prompt(session.data), replyMarkup: getKeyboard(['إلغاء']) }, env);
-
     } else if (session.state === STATES.WAITING_PHOTO) {
         if (session.editInfo && session.editInfo.isEditing && text) {
             await completeRequest(chatId, userId, session, env, true); // skipPhoto=true
         }
     } else {
-        // Should not happen in normal flow
         console.warn(`Unhandled state: ${session.state}`);
     }
 }
 
 export async function handleMartyrPhoto(chatId, userId, photoData, caption = '', env) {
-    console.log(`Handling photo message from user ${userId}.`);
     const session = await getUserSession(userId, env);
-
-    if (session.state !== STATES.WAITING_PHOTO) {
+    if (!session || session.state !== STATES.WAITING_PHOTO) {
         await sendTelegramMessage(chatId, { text: "يرجى اتباع الخطوات بالترتيب.", replyMarkup: getKeyboard(createMainKeyboard(session.state)) }, env);
         return;
     }
@@ -236,76 +227,50 @@ export async function handleMartyrPhoto(chatId, userId, photoData, caption = '',
 
 export async function handleMartyrCallback(chatId, userId, callbackQuery, env) {
     const [action, ...params] = callbackQuery.data.split('_');
-    const requestId = params.pop();
-    const actionType = [action, ...params].join('_');
+    const requestId = params.join('_'); 
+    const userInfo = callbackQuery.from;
 
     await answerCallbackQuery(callbackQuery.id, env, 'جاري معالجة طلبك...');
 
-    if (actionType === 'pending_delete' || actionType === 'rejected_delete') {
-        const success = await deleteRequest(requestId, env);
-        const message = success ? "تم حذف الطلب بنجاح." : "حدث خطأ أثناء حذف الطلب.";
-        await sendTelegramMessage(chatId, { text: message }, env);
+    if (action === 'pending' || action === 'rejected') {
+        const subAction = params[0];
+        const realRequestId = params[1];
+        if (subAction === 'delete') {
+            const success = await deleteRequest(realRequestId, env);
+            const message = success ? "تم حذف الطلب بنجاح." : "حدث خطأ أثناء حذف الطلب.";
+            await sendTelegramMessage(chatId, { text: message }, env);
+        } else if (subAction === 'edit') {
+            const originalRequest = await getSubmissionRequestByIdAndUser(realRequestId, userId, env);
+            if (originalRequest) {
+                await startUploadProcess(chatId, userId, userInfo, env, originalRequest, true);
+            } else {
+                 await sendTelegramMessage(chatId, { text: "لم يتم العثور على الطلب." }, env);
+            }
+        }
         return;
     }
-
-    // Handle actions on existing martyrs (from "My Additions")
-    if (action === 'edit' || action === 'delete') {
-        const originalMartyr = await getMartyrByIdAndUser(requestId, userId, env); // Use new function
-
-        if (!originalMartyr) {
-            await sendTelegramMessage(chatId, { text: "لم يتم العثور على الشهيد أو لا تملك صلاحية الوصول إليه." }, env);
-            return;
-        }
-
-        const userInfo = callbackQuery.from;
-
-        if (action === 'edit') {
-            // Check if there's already a pending edit request for this martyr
+    
+    const originalMartyr = await getMartyrByIdAndUser(requestId, userId, env);
+    if (originalMartyr) {
+         if (action === 'edit') {
             const existingPendingRequest = await getPendingRequestByTargetId(originalMartyr.id, env);
             if (existingPendingRequest) {
                 await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
                 return;
             }
-            await startUploadProcess(chatId, userId, userInfo, env, originalMartyr, false); // originalRequest is a martyr here
+            await startUploadProcess(chatId, userId, userInfo, env, originalMartyr, false);
         } else if (action === 'delete') {
-            // Check if there's already a pending delete request for this martyr
             const existingPendingRequest = await getPendingRequestByTargetId(originalMartyr.id, env);
             if (existingPendingRequest) {
-                await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل بالفعل لهذا الشهيد.` }, env);
+                await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
                 return;
             }
-            const success = await createDeleteRequest(userId, originalMartyr, env);
-            const message = success ? `تم إرسال طلب لحذف الشهيد \"<b>${originalMartyr.full_name}</b>\".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
+            const success = await createDeleteRequest(userId, originalMartyr, env, userInfo);
+            const message = success ? `تم إرسال طلب لحذف الشهيد \"<b>${originalMartyr.full_name}</b>\" للمراجعة.` : "حدث خطأ أثناء إنشاء طلب الحذف.";
             await sendTelegramMessage(chatId, { text: message }, env);
         }
-        return; // Important: return after handling martyr actions
-    }
-
-    const originalRequest = await getSubmissionRequestByIdAndUser(requestId, userId, env);
-
-    if (!originalRequest) {
-        await sendTelegramMessage(chatId, { text: "لم يتم العثور على الطلب أو لا تملك صلاحية الوصول إليه." }, env);
-        return;
-    }
-
-    const userInfo = callbackQuery.from;
-
-    if (actionType === 'pending_edit') {
-        await startUploadProcess(chatId, userId, userInfo, env, originalRequest, true);
-        return;
-    }
-
-    const existingPendingRequest = await getPendingRequestByTargetId(originalRequest.id, env);
-    if (existingPendingRequest) {
-        await sendTelegramMessage(chatId, { text: `يوجد طلب ${existingPendingRequest.type} قيد المراجعة بالفعل لهذا الشهيد.` }, env);
-        return;
-    }
-
-    if (action === 'delete') {
-        const success = await createDeleteRequest(userId, originalRequest, env);
-        const message = success ? `تم إرسال طلب لحذف الشهيد \"<b>${originalRequest.full_name}</b>\".` : "حدث خطأ أثناء إنشاء طلب الحذف.";
-        await sendTelegramMessage(chatId, { text: message }, env);
-    } else if (action === 'edit') {
-        await startUploadProcess(chatId, userId, userInfo, env, originalRequest, false);
+    } else {
+         await sendTelegramMessage(chatId, { text: "لم يتم العثور على البيانات المطلوبة أو لا تملك صلاحية الوصول إليها." }, env);
     }
 }
+
