@@ -18,6 +18,11 @@ const COMMANDS = {
 };
 
 async function handleTextMessage(chatId, userId, text, userInfo, env) {
+    if (text === COMMANDS.CANCEL) {
+        await handleCancel(chatId, userId, env);
+        return;
+    }
+
     const session = await getUserSession(userId, env);
 
     if (session.state !== STATES.IDLE) {
@@ -43,9 +48,6 @@ async function handleTextMessage(chatId, userId, text, userInfo, env) {
             break;
         case COMMANDS.MY_ADDITIONS:
             await handleShowMyAdditions(chatId, userId, env);
-            break;
-        case COMMANDS.CANCEL:
-            await handleCancel(chatId, userId, env);
             break;
         default:
             await sendTelegramMessage(chatId, {
