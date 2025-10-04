@@ -26,17 +26,23 @@ function formatPendingRequest(req) {
 }
 
 function formatRejectedRequest(req) {
+    const rejectionReason = req.rejection_reason ? `\n<b>سبب الرفض:</b> ${req.rejection_reason}` : '';
     const caption = `
 ❌ <b>الاسم الكامل:</b> ${req.full_name || 'غير متوفر'}
 <b>العمر عند الاستشهاد:</b> ${req.age || 'غير متوفر'}
 <b>تاريخ الولادة:</b> ${req.date_birth || 'غير متوفر'}
 <b>تاريخ الاستشهاد:</b> ${req.date_martyrdom || 'غير متوفر'}
 <b>مكان الاستشهاد:</b> ${req.place || 'غير متوفر'}
-<b>الحالة:</b> تم الرفض
+<b>الحالة:</b> تم الرفض${rejectionReason}
     `.trim();
 
     const inlineKeyboard = {
-        inline_keyboard: [[{
+        inline_keyboard: [[
+        {
+            text: '✏️ تعديل وإعادة إرسال',
+            callback_data: `rejected_edit_${req.id}`
+        },
+        {
             text: '🗑️ حذف',
             callback_data: `rejected_delete_${req.id}`
         }]]
